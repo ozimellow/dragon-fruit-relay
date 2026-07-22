@@ -6,9 +6,9 @@
 </p>
 
 <p align="center">
-  <a href="CHANGELOG.md"><img src="https://img.shields.io/badge/release-2.0.0-111827?style=flat-square" alt="Release 2.0.0"></a>
+  <a href="CHANGELOG.md"><img src="https://img.shields.io/badge/release-2.0.1-111827?style=flat-square" alt="Release 2.0.1"></a>
   <a href="https://www.debian.org/"><img src="https://img.shields.io/badge/platform-Debian-A81D33?style=flat-square" alt="Debian"></a>
-  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-C6265A?style=flat-square" alt="MIT License"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-GPL--3.0--or--later-C6265A?style=flat-square" alt="GPL-3.0-or-later"></a>
 </p>
 
 Dragon Fruit Relay manages route-based IKEv2/IPsec links between Debian hosts. It configures strongSwan, Linux XFRM interfaces, policy routing, DNS, systemd services, forwarding, NAT, diagnostics, recovery, and rollback from one interactive command.
@@ -102,4 +102,4 @@ The project name was chosen in solidarity with Kian Pirfalak and is dedicated to
 
 ## License
 
-Dragon Fruit Relay is released under the [MIT License](LICENSE).
+Dragon Fruit Relay is released under the [GNU General Public License v3.0 or later](LICENSE).

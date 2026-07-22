@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
 # Dragon Fruit Relay bootstrap installer
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 Alireza Ghaffari
 
 set -Eeuo pipefail
 umask 077
 
-readonly RELEASE_VERSION="2.0.0"
+readonly RELEASE_VERSION="2.0.1"
 readonly REPOSITORY="${DRAGON_FRUIT_REPOSITORY:-ozimellow/dragon-fruit-relay}"
 readonly REVISION="${DRAGON_FRUIT_REVISION:-main}"
 readonly SOURCE_URL="https://raw.githubusercontent.com/${REPOSITORY}/${REVISION}/dragon-fruit-relay.sh"

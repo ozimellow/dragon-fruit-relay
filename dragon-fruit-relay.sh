@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Dragon Fruit Relay - Production-style Debian route-based IKEv2/IPsec installer
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 Alireza Ghaffari
 
 set -Eeuo pipefail
 umask 077
@@ -39,7 +40,7 @@ if [[ ! -d /run/systemd/system ]]; then
 fi
 
 readonly APP_NAME="Dragon Fruit Relay"
-readonly APP_VERSION="2.0.0"
+readonly APP_VERSION="2.0.1"
 
 # Canonical Dragon Fruit Relay tree. Application-owned scripts and state live here.
 readonly CONFIG_DIR="/etc/dragonfruit-relay"
@@ -1578,7 +1579,7 @@ write_egress_config() {
 # Managed file. Shell syntax is used because helper scripts source it directly.
 # Role: egress node (receives IPsec and forwards selected traffic to Internet).
 CONFIG_SCHEMA=5
-MANAGED_BY_VERSION=2.0.0
+MANAGED_BY_VERSION=2.0.1
 
 # Node and physical network
 EOF_CONFIG
@@ -1620,7 +1621,7 @@ write_ingress_config() {
 # Managed file. Shell syntax is used because helper scripts source it directly.
 # Role: ingress node (selects traffic and sends it through the remote egress).
 CONFIG_SCHEMA=5
-MANAGED_BY_VERSION=2.0.0
+MANAGED_BY_VERSION=2.0.1
 
 # Node and physical network (automatically detected)
 EOF_CONFIG
@@ -4303,9 +4304,9 @@ migrate_legacy_ingress() {
     if ! grep -q '^PROFILE_NAME=' "$CONFIG_FILE"; then
         printf 'PROFILE_NAME=%q\n' 'legacy-peer' >>"$CONFIG_FILE"
     fi
-    sed -i -E 's/^CONFIG_SCHEMA=.*/CONFIG_SCHEMA=5/; s/^MANAGED_BY_VERSION=.*/MANAGED_BY_VERSION=2.0.0/' "$CONFIG_FILE"
+    sed -i -E 's/^CONFIG_SCHEMA=.*/CONFIG_SCHEMA=5/; s/^MANAGED_BY_VERSION=.*/MANAGED_BY_VERSION=2.0.1/' "$CONFIG_FILE"
     repair_current
-    success 'Legacy ingress upgraded in place to Dragon Fruit Relay 2.0.0 compatibility.'
+    success 'Legacy ingress upgraded in place to Dragon Fruit Relay 2.0.1 compatibility.'
 }
 
 legacy_migration_menu() {
