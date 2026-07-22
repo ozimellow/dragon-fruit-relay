@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 180" role="img" aria-labelledby="title desc">
+  <title id="title">Dragon Fruit Relay</title>
+  <desc id="desc">Dragon Fruit Relay wordmark and geometric relay mark.</desc>
+  <g transform="translate(18 10)">
+    <path fill="#111827" fill-rule="evenodd" d="M18 18h53c45 0 71 23 71 62s-26 62-71 62H18V18Zm31 30v64h22c28 0 42-11 42-32S99 48 71 48H49Z"/>
+    <path fill="none" stroke="#C6265A" stroke-width="11" stroke-linecap="round" stroke-linejoin="round" d="M59 101h18l21-24h24"/>
+    <circle cx="59" cy="101" r="9" fill="#C6265A"/>
+    <circle cx="98" cy="77" r="9" fill="#C6265A"/>
+    <circle cx="122" cy="77" r="9" fill="#C6265A"/>
+  </g>
+  <text x="198" y="105" fill="#111827" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="70" font-weight="720" letter-spacing="-2.4">Dragon Fruit</text>
+  <text x="635" y="105" fill="#C6265A" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="70" font-weight="720" letter-spacing="-2.4">Relay</text>
+  <text x="202" y="139" fill="#64748B" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="17" font-weight="600" letter-spacing="3.4">ROUTE-BASED IKEV2 FOR DEBIAN</text>
+</svg>

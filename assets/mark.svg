@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 160" role="img" aria-labelledby="title desc">
+  <title id="title">Dragon Fruit Relay mark</title>
+  <desc id="desc">A geometric letter D containing a three-node relay path.</desc>
+  <path fill="#111827" fill-rule="evenodd" d="M18 18h53c45 0 71 23 71 62s-26 62-71 62H18V18Zm31 30v64h22c28 0 42-11 42-32S99 48 71 48H49Z"/>
+  <path fill="none" stroke="#C6265A" stroke-width="11" stroke-linecap="round" stroke-linejoin="round" d="M59 101h18l21-24h24"/>
+  <circle cx="59" cy="101" r="9" fill="#C6265A"/>
+  <circle cx="98" cy="77" r="9" fill="#C6265A"/>
+  <circle cx="122" cy="77" r="9" fill="#C6265A"/>
+</svg>

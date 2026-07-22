@@ -1,0 +1,49 @@
+name: Bug report
+description: Report a reproducible Dragon Fruit Relay problem
+title: "[Bug]: "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: Do not include pairing tokens, PSKs, or unredacted diagnostic archives.
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      placeholder: 2.0.0
+    validations:
+      required: true
+  - type: input
+    id: debian
+    attributes:
+      label: Debian version
+    validations:
+      required: true
+  - type: dropdown
+    id: role
+    attributes:
+      label: Node role
+      options:
+        - Ingress client
+        - Egress hub
+        - Egress connection
+        - Unconfigured / installer
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Reproduction steps
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Redacted logs or diagnostics
+      render: shell
