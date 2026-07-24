@@ -6,7 +6,7 @@
 </p>
 
 <p align="center">
-  <a href="CHANGELOG.md"><img src="https://img.shields.io/badge/release-2.0.1-111827?style=flat-square" alt="Release 2.0.1"></a>
+  <a href="CHANGELOG.md"><img src="https://img.shields.io/badge/release-2.0.2-111827?style=flat-square" alt="Release 2.0.2"></a>
   <a href="https://www.debian.org/"><img src="https://img.shields.io/badge/platform-Debian-A81D33?style=flat-square" alt="Debian"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-GPL--3.0--or--later-C6265A?style=flat-square" alt="GPL-3.0-or-later"></a>
 </p>

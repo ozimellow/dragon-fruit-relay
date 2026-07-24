@@ -40,7 +40,7 @@ if [[ ! -d /run/systemd/system ]]; then
 fi
 
 readonly APP_NAME="Dragon Fruit Relay"
-readonly APP_VERSION="2.0.1"
+readonly APP_VERSION="2.0.2"
 
 # Canonical Dragon Fruit Relay tree. Application-owned scripts and state live here.
 readonly CONFIG_DIR="/etc/dragonfruit-relay"
@@ -63,9 +63,9 @@ readonly HUB_BIN_DIR="${CONFIG_DIR}/hub-bin"
 readonly SWANCTL_CLIENT_ROOT="/etc/swanctl/dragonfruit-relay"
 readonly STRONGSWAN_CLIENT_ROOT="/etc/strongswan.d/dragonfruit-relay"
 readonly CLIENT_UNIT_TEMPLATE="${SYSTEMD_DIR:-/etc/systemd/system}/dragonfruit-relay-client@.service"
-readonly HUB_SCHEMA_CURRENT="2"
-readonly PROFILE_SCHEMA_CURRENT="2"
-readonly PROFILE_TOKEN_VERSION="5"
+readonly HUB_SCHEMA_CURRENT="3"
+readonly PROFILE_SCHEMA_CURRENT="3"
+readonly PROFILE_TOKEN_VERSION="6"
 readonly PROFILE_NAME_MAX="32"
 readonly PROFILE_PORT_MIN="20000"
 readonly PROFILE_PORT_MAX="59999"
@@ -115,20 +115,24 @@ readonly RT_TABLE_MAX=250
 readonly RULE_PREF_MIN=10000
 readonly RULE_PREF_MAX=30000
 readonly DEFAULT_TUNNEL_CIDR="10.10.10.0/30"
-readonly DEFAULT_XFRM_ID="42"
-readonly DEFAULT_XFRM_IF="xfrm0"
+readonly DEFAULT_XFRM_ID="1001"
+readonly DEFAULT_XFRM_IF="dfr0001"
+readonly LEGACY_XFRM_ID="42"
+readonly LEGACY_XFRM_IF="xfrm0"
 readonly DEFAULT_XFRM_MTU="1400"
 readonly DEFAULT_DNS_PRIMARY="1.1.1.1"
 readonly DEFAULT_DNS_SECONDARY="8.8.8.8"
 readonly DEFAULT_INGRESS_ID="dragonfruit-relay-ingress"
 readonly DEFAULT_EGRESS_ID="dragonfruit-relay-egress"
-readonly DEFAULT_IKE_PORT="500"
-readonly DEFAULT_NATT_PORT="4500"
+readonly DEFAULT_IKE_PORT="0"
+readonly DEFAULT_NATT_PORT="0"
+readonly LEGACY_IKE_PORT="500"
+readonly LEGACY_NATT_PORT="4500"
 readonly DEFAULT_CUSTOM_NATT_PORT="45000"
 readonly CONNECT_TIMEOUT_SECONDS="18"
 readonly CUSTOM_NATT_PORT_MIN="20000"
 readonly CUSTOM_NATT_PORT_MAX="59999"
-readonly PAIRING_TOKEN_VERSION="4"
+readonly PAIRING_TOKEN_VERSION="6"
 
 TTY_IN="/dev/stdin"
 TTY_OUT="/dev/stdout"
@@ -405,7 +409,7 @@ prompt_custom_transport_port() {
             continue
         fi
 
-        if ss -H -lun 2>/dev/null | grep -Eq "[:.]${port}[[:space:]]"; then
+        if udp_port_in_use_live "$port"; then
             warn "UDP port ${port} is already in use on this server."
             confirm 'Use it anyway' no || continue
         fi
@@ -416,55 +420,25 @@ prompt_custom_transport_port() {
 }
 
 prompt_transport_mode() {
-    local choice
-
     section_title 'Tunnel UDP transport'
     cat >"$TTY_OUT" <<EOF_PORTS
-  ${C_GREEN}1)${C_RESET} Standard mode
-     ${C_DIM}IKE: UDP 500    NAT-T/encrypted traffic: UDP 4500${C_RESET}
-
-  ${C_MAGENTA}2)${C_RESET} Custom direct strongSwan port
-     ${C_DIM}Choose one public UDP port for IKE, NAT-T, and encrypted ESP-in-UDP.${C_RESET}
-     ${C_DIM}Suggested range: ${CUSTOM_NATT_PORT_MIN}-${CUSTOM_NATT_PORT_MAX}${C_RESET}
+  ${C_MAGENTA}Custom direct strongSwan transport only${C_RESET}
+     ${C_DIM}One public UDP port carries IKE, NAT-T, and ESP-in-UDP.${C_RESET}
+     ${C_DIM}UDP 500 and UDP 4500 are not opened or supported by this release.${C_RESET}
+     ${C_DIM}Accepted range: ${CUSTOM_NATT_PORT_MIN}-${CUSTOM_NATT_PORT_MAX}${C_RESET}
 EOF_PORTS
 
-    choice=$(prompt_default 'Choose port mode' '1')
-    case "$choice" in
-        1|'')
-            PORT_MODE='standard'
-            IKE_PORT="$DEFAULT_IKE_PORT"
-            NATT_PORT="$DEFAULT_NATT_PORT"
-            ;;
-        2)
-            PORT_MODE='custom'
-            # A custom strongSwan server port is a NAT-T socket. IKE packets
-            # use the non-ESP marker and encrypted ESP-in-UDP shares the same
-            # remote port; there is no custom equivalent of the 500 -> 4500
-            # automatic port switch.
-            IKE_PORT="$DEFAULT_IKE_PORT"
-            NATT_PORT=$(prompt_custom_transport_port \
-                'Custom direct UDP port' \
-                "$DEFAULT_CUSTOM_NATT_PORT" \
-                "$CUSTOM_NATT_PORT_MIN" \
-                "$CUSTOM_NATT_PORT_MAX")
-            ;;
-        *)
-            warn 'Unknown selection; using standard UDP 500 and 4500.'
-            PORT_MODE='standard'
-            IKE_PORT="$DEFAULT_IKE_PORT"
-            NATT_PORT="$DEFAULT_NATT_PORT"
-            ;;
-    esac
+    PORT_MODE='custom'
+    IKE_PORT="$DEFAULT_IKE_PORT"
+    NATT_PORT=$(prompt_custom_transport_port \
+        'Custom direct UDP port' \
+        "$DEFAULT_CUSTOM_NATT_PORT" \
+        "$CUSTOM_NATT_PORT_MIN" \
+        "$CUSTOM_NATT_PORT_MAX")
 }
 
 transport_label() {
-    if [[ "${PORT_MODE:-standard}" == 'custom' ]]; then
-        printf 'UDP %s (custom IKE + NAT-T/ESP)' "${NATT_PORT:-$DEFAULT_CUSTOM_NATT_PORT}"
-    else
-        printf 'UDP %s (IKE) + UDP %s (NAT-T)' \
-            "${IKE_PORT:-$DEFAULT_IKE_PORT}" \
-            "${NATT_PORT:-$DEFAULT_NATT_PORT}"
-    fi
+    printf 'UDP %s (custom IKE + NAT-T/ESP)' "${NATT_PORT:-$DEFAULT_CUSTOM_NATT_PORT}"
 }
 
 transport_description() {
@@ -472,25 +446,15 @@ transport_description() {
 }
 
 transport_forwarding_hint() {
-    if [[ "${PORT_MODE:-standard}" == 'custom' ]]; then
-        printf 'Forward UDP %s unchanged to this server' "$NATT_PORT"
-    else
-        printf 'Forward UDP %s for IKE and UDP %s for NAT-T, unchanged, to this server' \
-            "$IKE_PORT" "$NATT_PORT"
-    fi
+    printf 'Forward UDP %s unchanged to this server' "$NATT_PORT"
 }
 
 transport_listener_ok() {
-    if [[ "${PORT_MODE:-standard}" == 'custom' ]]; then
-        udp_listener_exists "$NATT_PORT"
-    else
-        udp_listener_exists "$IKE_PORT" && udp_listener_exists "$NATT_PORT"
-    fi
+    udp_listener_exists "$NATT_PORT"
 }
 
 udp_listener_exists() {
-    local port="$1"
-    ss -H -lunp 2>/dev/null | grep -Eq "[:.]${port}[[:space:]]"
+    udp_port_in_use_live "$1"
 }
 
 cidr_hosts() {
@@ -1013,21 +977,10 @@ load_config() {
     # shellcheck disable=SC1090
     source "$CONFIG_FILE"
 
-    # Backward-compatible defaults for configurations created by older releases.
-    PORT_MODE="${PORT_MODE:-standard}"
-    IKE_PORT="${IKE_PORT:-$DEFAULT_IKE_PORT}"
-    NATT_PORT="${NATT_PORT:-$DEFAULT_NATT_PORT}"
-
-    # Custom mode exposes one NAT-T socket to the peer. Obsolete dual-port
-    # custom configurations can establish IKE but cannot carry ESP-in-UDP on
-    # the second custom port because no automatic port switch occurs.
-    if [[ "$PORT_MODE" == 'custom' ]]; then
-        [[ "$NATT_PORT" != "$DEFAULT_IKE_PORT" ]] ||             die 'Invalid custom transport: the custom direct port may not be UDP 500.'
-        # Normalize obsolete v1.2.x dual-port configurations in memory. The
-        # custom server port is NATT_PORT; IKE_PORT remains the internal
-        # regular socket and is not exposed to the peer in custom mode.
-        IKE_PORT="$DEFAULT_IKE_PORT"
-    fi
+    # Preserve old values so removal can still clean legacy installations.
+    PORT_MODE="${PORT_MODE:-legacy-standard}"
+    IKE_PORT="${IKE_PORT:-$LEGACY_IKE_PORT}"
+    NATT_PORT="${NATT_PORT:-$LEGACY_NATT_PORT}"
 }
 
 write_common_xfrm_files() {
@@ -1039,6 +992,21 @@ write_common_xfrm_files() {
 set -Eeuo pipefail
 # shellcheck disable=SC1091
 source /etc/dragonfruit-relay/dragonfruit-relay.conf
+
+[[ "$XFRM_IF" =~ ^dfr[0-9]{4}$ ]] || {
+    echo "Unsupported XFRM interface name: $XFRM_IF" >&2
+    exit 1
+}
+dfr_index=$((10#${XFRM_IF#dfr}))
+expected_id=$((1000 + dfr_index))
+[[ "$XFRM_ID" == "$expected_id" ]] || {
+    echo "XFRM ID $XFRM_ID does not match $XFRM_IF (expected $expected_id)" >&2
+    exit 1
+}
+[[ "${PORT_MODE:-}" == custom ]] || {
+    echo "Only custom UDP transport is supported" >&2
+    exit 1
+}
 
 if ip link show dev "$XFRM_IF" >/dev/null 2>&1; then
     details=$(ip -d link show dev "$XFRM_IF")
@@ -1134,7 +1102,7 @@ connections {
         children {
             tunnel {
                 mode = tunnel
-                # Linux policy routing controls which traffic enters xfrm0.
+                # Linux policy routing controls which traffic enters the managed dfr interface.
                 local_ts = 0.0.0.0/0
                 remote_ts = 0.0.0.0/0
                 if_id_in = ${XFRM_ID}
@@ -1469,21 +1437,22 @@ EOF_OUTPUT
 }
 
 parse_pairing_token() {
-    local token="$1"
-    local decoded
+    local token="$1" decoded expected_index expected_id
+    TOKEN_LEGACY_NOTICE=''
+    TOKEN_LEGACY_XFRM_IF=''
     token=$(printf '%s' "$token" | tr -d '[:space:]')
-    decoded=$(printf '%s' "$token" | base64 -d 2>/dev/null) || die "The pairing token is not valid Base64."
+    decoded=$(printf '%s' "$token" | base64 -d 2>/dev/null) || die 'The pairing token is not valid Base64.'
 
-    local token_version="" exit_public_ip="" psk="" tunnel_cidr="" xfrm_id="" xfrm_if="" xfrm_mtu=""
-    local ingress_xfrm_cidr="" egress_xfrm_cidr="" ingress_xfrm_ip="" egress_xfrm_ip=""
-    local ingress_id="" egress_id="" dns_primary="" dns_secondary=""
-    local port_mode='standard' ike_port="$DEFAULT_IKE_PORT" natt_port="$DEFAULT_NATT_PORT"
-    local key value
-
+    local token_version='' profile_name='' exit_public_ip='' port_mode=''
+    local ike_port='' natt_port='' psk='' tunnel_cidr=''
+    local xfrm_id='' legacy_xfrm_if='' ingress_xfrm_if='' egress_xfrm_if='' xfrm_mtu=''
+    local ingress_xfrm_cidr='' egress_xfrm_cidr='' ingress_xfrm_ip='' egress_xfrm_ip=''
+    local ingress_id='' egress_id='' dns_primary='' dns_secondary='' key value
     while IFS='=' read -r key value; do
         value=${value%$'\r'}
         case "$key" in
             TOKEN_VERSION) token_version="$value" ;;
+            PROFILE_NAME) profile_name="$value" ;;
             EXIT_PUBLIC_IP) exit_public_ip="$value" ;;
             PORT_MODE) port_mode="$value" ;;
             IKE_PORT) ike_port="$value" ;;
@@ -1491,7 +1460,9 @@ parse_pairing_token() {
             PSK) psk="$value" ;;
             TUNNEL_CIDR) tunnel_cidr="$value" ;;
             XFRM_ID) xfrm_id="$value" ;;
-            XFRM_IF) xfrm_if="$value" ;;
+            XFRM_IF) legacy_xfrm_if="$value" ;;
+            INGRESS_XFRM_IF) ingress_xfrm_if="$value" ;;
+            EGRESS_XFRM_IF) egress_xfrm_if="$value" ;;
             XFRM_MTU) xfrm_mtu="$value" ;;
             INGRESS_XFRM_CIDR) ingress_xfrm_cidr="$value" ;;
             EGRESS_XFRM_CIDR) egress_xfrm_cidr="$value" ;;
@@ -1504,57 +1475,63 @@ parse_pairing_token() {
         esac
     done <<<"$decoded"
 
-    # Decode the schema version independently of shell/environment variable
-    # names.  Strip a possible UTF-8 BOM and CR left by copied text, then use
-    # an explicit case statement so a valid v4 token cannot be rejected by an
-    # accidental variable collision.
     token_version=${token_version#$'\xEF\xBB\xBF'}
-    token_version=${token_version%$'\r'}
     case "$token_version" in
+        6) ;;
+        5)
+            TOKEN_LEGACY_NOTICE='Token v5 custom transport was accepted and converted to the dfr-only token v6 interface model.'
+            ;;
         1|2|3|4)
+            die "Token version ${token_version} uses a removed legacy design. Create a new custom-port egress connection and token v6."
             ;;
-        '')
-            die 'The pairing token does not contain TOKEN_VERSION.'
-            ;;
-        *)
-            die "Unsupported pairing token version '${token_version}'. This installer supports token versions 1-4."
-            ;;
+        '') die 'The pairing token does not contain TOKEN_VERSION.' ;;
+        *) die "Unsupported pairing token version '${token_version}'. This release supports token v6 and custom-port token v5 conversion only." ;;
     esac
 
-    [[ "$port_mode" == 'standard' || "$port_mode" == 'custom' ]] || die 'Invalid transport mode in token.'
-    validate_udp_port "$ike_port" || die 'Invalid IKE port in token.'
-    validate_udp_port "$natt_port" || die 'Invalid NAT-T port in token.'
-    if [[ "$port_mode" == 'custom' ]]; then
-        [[ "$token_version" == "$PAIRING_TOKEN_VERSION" ]] || \
-            die 'This is an obsolete dual-port custom token. Migrate or rebuild the egress with the current Dragon Fruit Relay release and generate a new token.'
-        [[ "$ike_port" == "$DEFAULT_IKE_PORT" ]] || \
-            die 'Invalid custom token: IKE_PORT must remain at the internal default.'
-        [[ "$natt_port" != "$DEFAULT_IKE_PORT" ]] || \
-            die 'Invalid custom token: the custom direct port may not be UDP 500.'
+    validate_profile_name "$profile_name" || die 'Invalid or missing profile name in token.'
+    [[ "$port_mode" == custom ]] || die 'Standard UDP 500/4500 tokens are no longer supported. Recreate the egress connection with a custom UDP port.'
+    validate_uint_range "$natt_port" "$PROFILE_PORT_MIN" "$PROFILE_PORT_MAX" || die 'Invalid custom UDP port in token.'
+
+    if [[ "$token_version" == 5 ]]; then
+        [[ "$ike_port" == "$LEGACY_IKE_PORT" || "$ike_port" == "$DEFAULT_IKE_PORT" ]] || die 'Invalid token v5 IKE port.'
+        TOKEN_LEGACY_XFRM_IF="${ingress_xfrm_if:-${legacy_xfrm_if:-$LEGACY_XFRM_IF}}"
+        [[ "$egress_xfrm_if" =~ ^dfr[0-9]{4}$ ]] || die 'Token v5 does not contain a valid dfr egress interface. Recreate the egress connection.'
+        ingress_xfrm_if="$egress_xfrm_if"
+    else
+        [[ "$ike_port" == "$DEFAULT_IKE_PORT" ]] || die 'Token v6 must disable the default IKE socket with IKE_PORT=0.'
+        [[ "$ingress_xfrm_if" =~ ^dfr[0-9]{4}$ ]] || die 'Invalid ingress dfr interface in token.'
+        [[ "$egress_xfrm_if" =~ ^dfr[0-9]{4}$ ]] || die 'Invalid egress dfr interface in token.'
+        [[ "$ingress_xfrm_if" == "$egress_xfrm_if" ]] || die 'Token v6 ingress and egress dfr interface names must match.'
     fi
 
-    require_ipv4 "egress public IP" "$exit_public_ip"
-    require_ipv4 "ingress XFRM IP" "$ingress_xfrm_ip"
-    require_ipv4 "egress XFRM IP" "$egress_xfrm_ip"
-    require_ipv4 "primary DNS server" "$dns_primary"
-    require_ipv4 "secondary DNS server" "$dns_secondary"
-    validate_uint_range "$xfrm_id" 1 4294967295 || die "Invalid XFRM interface ID in token."
-    validate_uint_range "$xfrm_mtu" 1200 9000 || die "Invalid XFRM MTU in token."
-    validate_interface_name "$xfrm_if" || die "Invalid XFRM interface name in token."
-    validate_identity "$ingress_id" || die "Invalid ingress identity in token."
-    validate_identity "$egress_id" || die "Invalid egress identity in token."
-    [[ "$psk" =~ ^[A-Fa-f0-9]{64,128}$ ]] || die "Invalid pre-shared key in token."
-    cidr_hosts "$tunnel_cidr" >/dev/null || die "Invalid tunnel CIDR in token."
-    [[ "$ingress_xfrm_cidr" == */30 && "$egress_xfrm_cidr" == */30 ]] || die "Invalid XFRM CIDRs in token."
+    require_ipv4 'egress public IP' "$exit_public_ip"
+    require_ipv4 'ingress XFRM IP' "$ingress_xfrm_ip"
+    require_ipv4 'egress XFRM IP' "$egress_xfrm_ip"
+    require_ipv4 'primary DNS server' "$dns_primary"
+    require_ipv4 'secondary DNS server' "$dns_secondary"
+    validate_uint_range "$xfrm_id" 1 4294967295 || die 'Invalid XFRM interface ID in token.'
+    validate_uint_range "$xfrm_mtu" 1200 9000 || die 'Invalid XFRM MTU in token.'
+    validate_identity "$ingress_id" || die 'Invalid ingress identity in token.'
+    validate_identity "$egress_id" || die 'Invalid egress identity in token.'
+    [[ "$psk" =~ ^[A-Fa-f0-9]{64,128}$ ]] || die 'Invalid pre-shared key in token.'
+    cidr_hosts "$tunnel_cidr" >/dev/null || die 'Invalid tunnel CIDR in token.'
+    [[ "$ingress_xfrm_cidr" == */30 && "$egress_xfrm_cidr" == */30 ]] || die 'Invalid XFRM CIDRs in token.'
 
+    expected_index=$((10#${egress_xfrm_if#dfr}))
+    ((expected_index >= 1 && expected_index <= 9999)) || die 'Invalid dfr interface index in token.'
+    expected_id=$((PROFILE_XFRM_ID_BASE + expected_index))
+    [[ "$xfrm_id" == "$expected_id" ]] || die "Token XFRM ID ${xfrm_id} does not match ${egress_xfrm_if} (expected ${expected_id})."
+
+    TOKEN_PROFILE_NAME="$profile_name"
     TOKEN_EXIT_PUBLIC_IP="$exit_public_ip"
-    TOKEN_PORT_MODE="$port_mode"
-    TOKEN_IKE_PORT="$ike_port"
+    TOKEN_PORT_MODE='custom'
+    TOKEN_IKE_PORT="$DEFAULT_IKE_PORT"
     TOKEN_NATT_PORT="$natt_port"
     TOKEN_PSK="$psk"
     TOKEN_TUNNEL_CIDR="$tunnel_cidr"
     TOKEN_XFRM_ID="$xfrm_id"
-    TOKEN_XFRM_IF="$xfrm_if"
+    TOKEN_XFRM_IF="$ingress_xfrm_if"
+    TOKEN_EGRESS_XFRM_IF="$egress_xfrm_if"
     TOKEN_XFRM_MTU="$xfrm_mtu"
     TOKEN_INGRESS_XFRM_CIDR="$ingress_xfrm_cidr"
     TOKEN_EGRESS_XFRM_CIDR="$egress_xfrm_cidr"
@@ -1570,6 +1547,16 @@ validate_interface_name() {
     [[ "$1" =~ ^[A-Za-z0-9_.-]{1,15}$ ]]
 }
 
+validate_dfr_interface_identity() {
+    local interface="${1:-}" xfrm_id="${2:-}" index expected_id
+    [[ "$interface" =~ ^dfr[0-9]{4}$ ]] || return 1
+    index=$((10#${interface#dfr}))
+    [[ "$xfrm_id" =~ ^[0-9]+$ ]] || return 1
+    ((index >= 1 && index <= 9999)) || return 1
+    expected_id=$((PROFILE_XFRM_ID_BASE + index))
+    [[ "$xfrm_id" == "$expected_id" ]]
+}
+
 write_egress_config() {
     ensure_managed_layout
     {
@@ -1578,8 +1565,8 @@ write_egress_config() {
 # -------------------------------------
 # Managed file. Shell syntax is used because helper scripts source it directly.
 # Role: egress node (receives IPsec and forwards selected traffic to Internet).
-CONFIG_SCHEMA=5
-MANAGED_BY_VERSION=2.0.1
+CONFIG_SCHEMA=6
+MANAGED_BY_VERSION=2.0.2
 
 # Node and physical network
 EOF_CONFIG
@@ -1620,8 +1607,8 @@ write_ingress_config() {
 # -------------------------------------
 # Managed file. Shell syntax is used because helper scripts source it directly.
 # Role: ingress node (selects traffic and sends it through the remote egress).
-CONFIG_SCHEMA=5
-MANAGED_BY_VERSION=2.0.1
+CONFIG_SCHEMA=6
+MANAGED_BY_VERSION=2.0.2
 
 # Node and physical network (automatically detected)
 EOF_CONFIG
@@ -1701,7 +1688,7 @@ show_ike_failure_details() {
         print_check fail 'Likely cause' 'No IKE packet left the ingress interface.'
         print_check info 'Check local state' 'Loaded connection, strongSwan sockets and the endpoint route.'
     else
-        print_check fail 'Likely cause' "No usable IKE response from ${PEER_PUBLIC_IP}:${IKE_PORT}."
+        print_check fail 'Likely cause' "No usable IKE response from ${PEER_PUBLIC_IP}:${NATT_PORT}."
     fi
 }
 
@@ -1712,11 +1699,7 @@ attempt_tunnel_connection() {
     pcap=$(mktemp /tmp/dragonfruit-relay-ike.XXXXXX.pcap)
     if command -v tcpdump >/dev/null 2>&1; then
         local capture_filter
-        if [[ "$PORT_MODE" == 'custom' ]]; then
-            capture_filter="host $PEER_PUBLIC_IP and udp port $NATT_PORT"
-        else
-            capture_filter="host $PEER_PUBLIC_IP and (udp port $IKE_PORT or udp port $NATT_PORT)"
-        fi
+        capture_filter="host $PEER_PUBLIC_IP and udp port $NATT_PORT"
         timeout --signal=TERM "$((CONNECT_TIMEOUT_SECONDS + 4))s" \
             tcpdump -U -ni "$WAN_IF" "$capture_filter" \
             -w "$pcap" >/dev/null 2>&1 &
@@ -1830,13 +1813,14 @@ delete_rule_pref_all() {
 
 dragonfruit_default_xfrm_signature() {
     local iface="$1" details addresses expected_hex
+    [[ "$iface" == "$LEGACY_XFRM_IF" ]] || return 1
     ip link show dev "$iface" >/dev/null 2>&1 || return 1
     details=$(ip -d link show dev "$iface" 2>/dev/null || true)
     addresses=$(ip -4 -o address show dev "$iface" 2>/dev/null || true)
-    expected_hex=$(printf '0x%x' "$DEFAULT_XFRM_ID")
+    expected_hex=$(printf '0x%x' "$LEGACY_XFRM_ID")
 
-    grep -q 'xfrm' <<<"$details" || return 1
-    grep -Eq "if_id (${DEFAULT_XFRM_ID}|${expected_hex})([[:space:]]|$)" <<<"$details" || return 1
+    grep -qw 'xfrm' <<<"$details" || return 1
+    grep -Eq "if_id (${LEGACY_XFRM_ID}|${expected_hex})([[:space:]]|$)" <<<"$details" || return 1
     grep -Eq '10\.10\.10\.(1|2)/30([[:space:]]|$)' <<<"$addresses"
 }
 
@@ -1846,6 +1830,18 @@ verify_managed_runtime_absent() {
 
     if [[ -n "$xfrm_if" ]] && ip link show dev "$xfrm_if" >/dev/null 2>&1; then
         error "Cleanup verification failed: interface $xfrm_if remains."
+        failed=1
+    fi
+    if dragonfruit_xfrm_links_exist; then
+        error "Cleanup verification failed: dfr XFRM interfaces remain: $(list_dragonfruit_xfrm_links | paste -sd ', ' -)"
+        failed=1
+    fi
+    if legacy_dragonfruit_xfrm_links_exist; then
+        error "Cleanup verification failed: legacy Dragon Fruit Relay XFRM interfaces remain: $(list_legacy_dragonfruit_xfrm_links | paste -sd ', ' -)"
+        failed=1
+    fi
+    if dragonfruit_runtime_namespaces_exist; then
+        error 'Cleanup verification failed: isolated client runtime namespaces remain.'
         failed=1
     fi
     for pref in "$p1" "$p2" "$p3"; do
@@ -1924,17 +1920,13 @@ clean_abandoned_install_before_setup() {
     systemctl stop dragonfruit-relay-healthcheck.service dragonfruit-relay-dns.service \
         dragonfruit-relay-routing.service >/dev/null 2>&1 || true
 
-    # Remove all uniquely tagged relay rules before restoring original files.
+    # Remove all uniquely tagged relay rules and all abandoned managed XFRM
+    # devices before restoring original files.
     remove_all_dragonfruit_network_rules || true
     remove_legacy_firewall_artifacts
-
-    if ip link show dev "$DEFAULT_XFRM_IF" >/dev/null 2>&1; then
-        if [[ "$prior_evidence" == yes ]] || dragonfruit_default_xfrm_signature "$DEFAULT_XFRM_IF"; then
-            delete_link_bounded "$DEFAULT_XFRM_IF" || true
-        else
-            die "Interface $DEFAULT_XFRM_IF already exists but is not identifiable as Dragon Fruit Relay state. Remove or rename it manually before setup."
-        fi
-    fi
+    remove_abandoned_dragonfruit_xfrm_links yes
+    remove_legacy_dragonfruit_xfrm_links
+    remove_residual_runtime_namespaces
 
     # Restore the prior attempt only after all relay runtime state is gone.
     if [[ -f "$MANIFEST_FILE" ]]; then
@@ -1985,6 +1977,9 @@ rollback_failed_setup() {
     restore_pre_routevpn_state "$role" || true
     rm -rf "$CONFIG_DIR" "$LEGACY_LIB_DIR"
     delete_link_bounded "$old_xfrm" || true
+    remove_abandoned_dragonfruit_xfrm_links yes
+    remove_legacy_dragonfruit_xfrm_links
+    remove_residual_runtime_namespaces
     systemctl daemon-reload >/dev/null 2>&1 || true
     systemctl reset-failed >/dev/null 2>&1 || true
 
@@ -2070,7 +2065,7 @@ setup_egress() {
     DNS_PRIMARY="$DEFAULT_DNS_PRIMARY"
     DNS_SECONDARY="$DEFAULT_DNS_SECONDARY"
 
-    if ! confirm 'Use recommended tunnel settings (10.10.10.0/30, xfrm0, ID 42, MTU 1400, Cloudflare/Google DNS)' yes; then
+    if ! confirm 'Use recommended tunnel settings (10.10.10.0/30, dfr0001, ID 1001, MTU 1400, Cloudflare/Google DNS)' yes; then
         mapfile -t tunnel_data < <(prompt_tunnel_network)
         TUNNEL_CIDR=${tunnel_data[0]}
         INGRESS_XFRM_CIDR=${tunnel_data[1]}
@@ -2096,9 +2091,9 @@ setup_egress() {
     write_egress_config
     load_config
     if ! (
-        write_common_xfrm_files
-        write_strongswan_common_files
-        write_swanctl_egress
+        write_common_xfrm_files &&
+        write_strongswan_common_files &&
+        write_swanctl_egress &&
         activate_egress
     ); then
         rollback_failed_setup egress
@@ -2162,6 +2157,13 @@ setup_ingress() {
     fi
     [[ -n "$token" ]] || die 'A pairing token is required.'
     parse_pairing_token "$token"
+    if [[ -n "${TOKEN_LEGACY_NOTICE:-}" ]]; then
+        warn "$TOKEN_LEGACY_NOTICE"
+        if [[ -n "${TOKEN_LEGACY_XFRM_IF:-}" ]]; then
+            remove_legacy_token_xfrm_interface "$TOKEN_LEGACY_XFRM_IF" "$TOKEN_XFRM_ID"
+        fi
+        print_check info 'New ingress interface' "$TOKEN_XFRM_IF"
+    fi
 
     local detected_if detected_local detected_public detected_gateway
     detected_if=$(detect_default_interface)
@@ -2238,11 +2240,11 @@ setup_ingress() {
     write_ingress_config
     load_config
     if ! (
-        write_common_xfrm_files
-        write_strongswan_common_files
-        write_swanctl_ingress
-        write_ingress_routing_files
-        write_ingress_healthcheck_files
+        write_common_xfrm_files &&
+        write_strongswan_common_files &&
+        write_swanctl_ingress &&
+        write_ingress_routing_files &&
+        write_ingress_healthcheck_files &&
         activate_ingress
     ); then
         rollback_failed_setup ingress
@@ -2669,30 +2671,33 @@ diagnostics_preflight() {
     banner
     section_title 'Ready to configure'
 
-    local iface gateway public_ip route_default
+    local iface gateway public_ip route_default dfr_links suspicious_dfr legacy_state
     iface=$(detect_default_interface || true)
     gateway=$(detect_default_gateway || true)
     public_ip=$(detect_public_ipv4 || true)
     route_default=$(ip -4 route show default 2>/dev/null | head -n 1 || true)
+    dfr_links=$(list_dragonfruit_xfrm_links | paste -sd ', ' - 2>/dev/null || true)
+    suspicious_dfr=$(list_suspicious_dfr_links | paste -sd ', ' - 2>/dev/null || true)
+    legacy_state=$(list_legacy_dragonfruit_xfrm_links | paste -sd ', ' - 2>/dev/null || true)
 
     print_check pass 'Platform' "${PRETTY_NAME:-Debian} with systemd"
     [[ -n "$iface" ]] && print_check pass 'Internet interface' "$iface" || print_check fail 'Internet interface' 'not detected'
     [[ -n "$gateway" ]] && print_check pass 'Default gateway' "$gateway" || print_check warn 'Default gateway' 'not detected'
     [[ -n "$public_ip" ]] && print_check info 'Observed public IPv4' "$public_ip" || print_check warn 'Observed public IPv4' 'external lookup failed'
     print_check info 'Default route' "${route_default:-missing}"
+    print_check info 'Transport policy' "Custom UDP ${PROFILE_PORT_MIN}-${PROFILE_PORT_MAX} only; no UDP 500/4500"
+    print_check info 'Interface policy' 'dfrNNNN only'
 
-    section_title 'Conflicts'
-    if ip link show dev xfrm0 >/dev/null 2>&1; then
-        print_check warn 'xfrm0' 'already exists; remove or rebuild the existing relay first'
-    else
-        print_check pass 'xfrm0' 'available'
-    fi
+    section_title 'Residual state'
+    [[ -n "$dfr_links" ]] && print_check warn 'Managed DFR interfaces' "$dfr_links" || print_check pass 'Managed DFR interfaces' 'none'
+    [[ -n "$suspicious_dfr" ]] && print_check warn 'Unmanaged dfr-like names' "$suspicious_dfr (left untouched)"
+    [[ -n "$legacy_state" ]] && print_check warn 'Legacy xfrm interfaces' "$legacy_state (will be removed; recreate connections)" || print_check pass 'Legacy xfrm interfaces' 'none'
     legacy_routevpn_detected && print_check warn 'Legacy RouteVPN' 'old files or services detected' || print_check pass 'Legacy RouteVPN' 'not detected'
 
     section_title 'Next step'
-    printf '  Choose %sCreate egress%s on the public exit server first, then paste its token into %sCreate ingress%s.\n' \
-        "$C_GREEN" "$C_RESET" "$C_GREEN" "$C_RESET" >"$TTY_OUT"
+    printf '  Create the egress hub first, add a custom-port connection, then paste its token v6 into the ingress installer.\n' >"$TTY_OUT"
 }
+
 diagnostics_menu() {
     if [[ ! -f "$CONFIG_FILE" ]]; then
         diagnostics_preflight
@@ -2773,7 +2778,7 @@ remove_managed_integration_path() {
     local path="$1" target=''
     [[ -e "$path" || -L "$path" ]] || return 0
     if [[ -L "$path" ]]; then
-        target=$(readlink -f -- "$path" 2>/dev/null || true)
+        target=$(readlink -f -- "$path" 2>/dev/null || readlink -- "$path" 2>/dev/null || true)
         if [[ "$target" == "$CONFIG_DIR"/* ]]; then
             rm -f -- "$path"
         fi
@@ -2876,7 +2881,9 @@ remove_tunnel_configuration() {
         [[ -d "$CONFIG_DIR" || -d "$STATE_DIR" || -d "$LEGACY_LIB_DIR" ]] && residual=yes
         compgen -G "$SYSTEMD_DIR/dragonfruit-relay-*.service" >/dev/null && residual=yes
         compgen -G "$SYSTEMD_DIR/dragonfruit-relay-*.timer" >/dev/null && residual=yes
-        ip link show dev "$DEFAULT_XFRM_IF" >/dev/null 2>&1 && residual=yes
+        dragonfruit_xfrm_links_exist && residual=yes
+        legacy_dragonfruit_xfrm_links_exist && residual=yes
+        dragonfruit_runtime_namespaces_exist && residual=yes
         [[ "$residual" == yes ]] || die 'Dragon Fruit Relay is not configured and no residual state was found.'
         [[ "$skip_confirm" == yes ]] || confirm 'Remove residual Dragon Fruit Relay state and restore available backups?' no || return 0
         clean_abandoned_install_before_setup
@@ -2892,6 +2899,8 @@ remove_tunnel_configuration() {
     remove_runtime_and_files "$old_role"
     restore_pre_routevpn_state "$old_role"
     delete_link_bounded "$REMOVED_XFRM_IF" || true
+    remove_abandoned_dragonfruit_xfrm_links yes
+    remove_legacy_dragonfruit_xfrm_links
     rm -rf "$CONFIG_DIR" "$LEGACY_LIB_DIR"
     systemctl daemon-reload >/dev/null 2>&1 || true
 
@@ -2936,7 +2945,9 @@ uninstall_routevpn() {
         [[ -e "$CLI_COMMAND" || -L "$CLI_COMMAND" ]] && residual=yes
         compgen -G "$SYSTEMD_DIR/dragonfruit-relay-*.service" >/dev/null && residual=yes
         compgen -G "$SYSTEMD_DIR/dragonfruit-relay-*.timer" >/dev/null && residual=yes
-        ip link show dev "$DEFAULT_XFRM_IF" >/dev/null 2>&1 && residual=yes
+        dragonfruit_xfrm_links_exist && residual=yes
+        legacy_dragonfruit_xfrm_links_exist && residual=yes
+        dragonfruit_runtime_namespaces_exist && residual=yes
         [[ "$residual" == yes ]] || die 'No Dragon Fruit Relay installation or residual state was found.'
         confirm 'Remove all residual Dragon Fruit Relay state and restore available backups?' no || return 0
         clean_abandoned_install_before_setup
@@ -2970,11 +2981,11 @@ cleanup_legacy_routevpn() {
     confirm 'Remove the legacy RouteVPN services and partial tunnel before continuing?' yes || return 1
 
     local legacy_cfg=/etc/routevpn/routevpn.conf
-    local old_xfrm=xfrm0 old_table='' p1='' p2='' p3=''
+    local old_xfrm="$LEGACY_XFRM_IF" old_table='' p1='' p2='' p3=''
     if [[ -f "$legacy_cfg" ]]; then
         # shellcheck disable=SC1090
         source "$legacy_cfg" || true
-        old_xfrm="${XFRM_IF:-xfrm0}"
+        old_xfrm="${XFRM_IF:-$LEGACY_XFRM_IF}"
         old_table="${ROUTE_TABLE:-}"
         p1="${RULE_DNS_PRIMARY:-}"
         p2="${RULE_DNS_SECONDARY:-}"
@@ -3007,7 +3018,7 @@ handle_legacy_routevpn() {
     if legacy_routevpn_detected && [[ ! -f "$CONFIG_FILE" ]]; then
         clear_screen
         banner
-        cleanup_legacy_routevpn || warn 'Legacy installation was not removed. New setup may conflict with xfrm0 or old services.'
+        cleanup_legacy_routevpn || warn 'Legacy installation was not removed. New setup may conflict with legacy XFRM interfaces or old services.'
         pause_screen
     fi
 }
@@ -3057,7 +3068,21 @@ legacy_single_configured() {
         set +u
         # shellcheck disable=SC1090
         source "$CONFIG_FILE"
-        [[ "${ROLE:-}" == egress || "${CONFIG_SCHEMA:-0}" != 5 ]]
+        case "${ROLE:-}" in
+            egress)
+                # Every single-peer egress configuration predates the hub-only
+                # custom-port/dfr design and must be removed and recreated.
+                exit 0
+                ;;
+            ingress)
+                [[ "${CONFIG_SCHEMA:-0}" != 6 ]] ||
+                [[ "${PORT_MODE:-}" != custom ]] ||
+                [[ ! "${XFRM_IF:-}" =~ ^dfr[0-9]{4}$ ]]
+                ;;
+            *)
+                exit 1
+                ;;
+        esac
     )
 }
 
@@ -3091,7 +3116,6 @@ ensure_hub_layout() {
     install -d -m 0700 "$SECRETS_DIR" "$STATE_DIR" "$BACKUP_DIR"
     claim_managed_namespace "$SWANCTL_CLIENT_ROOT"
     claim_managed_namespace "$STRONGSWAN_CLIENT_ROOT"
-    install -d -m 0755 /run/dragonfruit-relay
 }
 
 load_host_config() {
@@ -3109,9 +3133,74 @@ profile_strongswan_source() { printf '%s/strongswan.conf' "$(profile_dir "$1")";
 profile_swanctl_dir() { printf '%s/%s' "$SWANCTL_CLIENT_ROOT" "$1"; }
 profile_swanctl_canonical() { printf '%s/swanctl.conf' "$(profile_swanctl_dir "$1")"; }
 profile_strongswan_canonical() { printf '%s/%s.conf' "$STRONGSWAN_CLIENT_ROOT" "$1"; }
-profile_vici_socket() { printf '/run/dragonfruit-relay/%s.vici' "$1"; }
-profile_vici_uri() { printf 'unix:///run/dragonfruit-relay/%s.vici' "$1"; }
+# Debian's charon-systemd AppArmor profile permits /run/charon.*. Keep every
+# isolated daemon socket in that packaged namespace instead of weakening the
+# host policy with a broad local override.
+profile_vici_socket() { printf '/run/charon.dragonfruit-relay-%s.vici' "$1"; }
+profile_vici_uri() { printf 'unix:///run/charon.dragonfruit-relay-%s.vici' "$1"; }
+legacy_profile_vici_socket() { printf '/run/dragonfruit-relay/%s.vici' "$1"; }
 profile_service() { printf 'dragonfruit-relay-client@%s.service' "$1"; }
+
+cleanup_profile_runtime_sockets() {
+    local name="$1" configured_socket="${2:-}"
+    [[ -n "$configured_socket" ]] && cleanup_vici_socket "$configured_socket"
+    cleanup_vici_socket "$(profile_vici_socket "$name")"
+    cleanup_vici_socket "$(legacy_profile_vici_socket "$name")"
+    rmdir /run/dragonfruit-relay 2>/dev/null || true
+}
+
+dragonfruit_runtime_namespaces_exist() {
+    [[ -e "$CLIENT_UNIT_TEMPLATE" || -L "$CLIENT_UNIT_TEMPLATE" ]] && return 0
+    [[ -d "$SWANCTL_CLIENT_ROOT" || -L "$SWANCTL_CLIENT_ROOT" ]] && return 0
+    [[ -d "$STRONGSWAN_CLIENT_ROOT" || -L "$STRONGSWAN_CLIENT_ROOT" ]] && return 0
+    [[ -d /run/dragonfruit-relay ]] && return 0
+    compgen -G '/run/charon.dragonfruit-relay-*' >/dev/null && return 0
+    return 1
+}
+
+remove_residual_runtime_namespaces() {
+    local path target
+
+    # Stop every isolated responder before removing its canonical files. The
+    # quoted pattern is interpreted by systemd, not by the shell.
+    timeout 25s systemctl disable --now 'dragonfruit-relay-client@*.service' >/dev/null 2>&1 || true
+    rm -f -- "$CLIENT_UNIT_TEMPLATE"
+
+    if [[ -L "$SWANCTL_CLIENT_ROOT" ]]; then
+        target=$(readlink -f -- "$SWANCTL_CLIENT_ROOT" 2>/dev/null || readlink -- "$SWANCTL_CLIENT_ROOT" 2>/dev/null || true)
+        case "$target" in
+            "$CONFIG_DIR"|"$CONFIG_DIR"/*|"$LEGACY_LIB_DIR"|"$LEGACY_LIB_DIR"/*) rm -f -- "$SWANCTL_CLIENT_ROOT" ;;
+        esac
+    elif [[ -e "$SWANCTL_CLIENT_ROOT/.dragonfruit-relay-root" ]]; then
+        rm -rf -- "$SWANCTL_CLIENT_ROOT"
+    elif [[ -d "$SWANCTL_CLIENT_ROOT" ]]; then
+        for path in "$SWANCTL_CLIENT_ROOT"/*; do
+            [[ -d "$path" ]] || continue
+            if [[ -e "$path/.dragonfruit-relay-profile" || -e "$path/.dragonfruit-relay-ingress" ]]; then
+                rm -rf -- "$path"
+            fi
+        done
+        rmdir "$SWANCTL_CLIENT_ROOT" 2>/dev/null || true
+    fi
+
+    if [[ -L "$STRONGSWAN_CLIENT_ROOT" ]]; then
+        target=$(readlink -f -- "$STRONGSWAN_CLIENT_ROOT" 2>/dev/null || readlink -- "$STRONGSWAN_CLIENT_ROOT" 2>/dev/null || true)
+        case "$target" in
+            "$CONFIG_DIR"|"$CONFIG_DIR"/*|"$LEGACY_LIB_DIR"|"$LEGACY_LIB_DIR"/*) rm -f -- "$STRONGSWAN_CLIENT_ROOT" ;;
+        esac
+    elif [[ -e "$STRONGSWAN_CLIENT_ROOT/.dragonfruit-relay-root" ]]; then
+        rm -rf -- "$STRONGSWAN_CLIENT_ROOT"
+    elif [[ -d "$STRONGSWAN_CLIENT_ROOT" ]]; then
+        for path in "$STRONGSWAN_CLIENT_ROOT"/*.conf; do
+            [[ -f "$path" ]] || continue
+            grep -q '^# Managed by Dragon Fruit Relay ' "$path" 2>/dev/null && rm -f -- "$path"
+        done
+        rmdir "$STRONGSWAN_CLIENT_ROOT" 2>/dev/null || true
+    fi
+
+    rm -f -- /run/charon.dragonfruit-relay-*.vici         /run/charon.dragonfruit-relay-*.dck         /run/charon.dragonfruit-relay-*.ctl         /run/charon.dragonfruit-relay-*.wlst
+    rm -rf -- /run/dragonfruit-relay
+}
 
 profile_exists() {
     [[ -f "$(profile_config_file "$1")" ]]
@@ -3192,11 +3281,7 @@ profile_uses_port() {
             set +u
             # shellcheck disable=SC1090
             source "$(profile_config_file "$name")"
-            if [[ "${PORT_MODE:-}" == standard ]]; then
-                [[ "$wanted" == 500 || "$wanted" == 4500 ]]
-            else
-                [[ "${NATT_PORT:-}" == "$wanted" ]]
-            fi
+            [[ "${PORT_MODE:-}" == custom && "${NATT_PORT:-}" == "$wanted" ]]
         ); then
             return 0
         fi
@@ -3212,11 +3297,7 @@ profile_using_port() {
             set +u
             # shellcheck disable=SC1090
             source "$(profile_config_file "$name")"
-            if [[ "${PORT_MODE:-}" == standard ]]; then
-                [[ "$wanted" == 500 || "$wanted" == 4500 ]]
-            else
-                [[ "${NATT_PORT:-}" == "$wanted" ]]
-            fi
+            [[ "${PORT_MODE:-}" == custom && "${NATT_PORT:-}" == "$wanted" ]]
         ); then
             printf '%s' "$name"
             return 0
@@ -3227,12 +3308,19 @@ profile_using_port() {
 
 udp_port_in_use_live() {
     local port="$1"
-    ss -H -lun 2>/dev/null | awk -v port=":${port}" '$5 ~ port "$" {found=1} END {exit !found}'
+    validate_udp_port "$port" || return 1
+    # The local endpoint is the penultimate field in `ss -H -lun` output for
+    # both IPv4 and IPv6. Match the complete port suffix, not a substring.
+    ss -H -lun 2>/dev/null | awk -v suffix=":${port}" '
+        $(NF-1) ~ suffix "$" { found=1 }
+        END { exit(found ? 0 : 1) }
+    '
 }
 
 standard_transport_available() {
-    ! profile_uses_port 500 && ! profile_uses_port 4500 && \
-    ! udp_port_in_use_live 500 && ! udp_port_in_use_live 4500
+    # Retained as a compatibility symbol for old callers. Standard IKE ports
+    # are deliberately unsupported from 2.0.2 onward.
+    return 1
 }
 
 custom_port_available() {
@@ -3256,22 +3344,15 @@ resolve_requested_transport() {
     local request="${1:-auto}" suggested owner
     case "$request" in
         auto|'')
-            if standard_transport_available; then
-                NEW_PORT_MODE='standard'; NEW_IKE_PORT=500; NEW_NATT_PORT=4500
-            else
-                suggested=$(find_next_custom_port) || die 'No available custom UDP port remains in the accepted range.'
-                NEW_PORT_MODE='custom'; NEW_IKE_PORT=500; NEW_NATT_PORT="$suggested"
-            fi
+            suggested=$(find_next_custom_port) || die 'No available custom UDP port remains in the accepted range.'
+            NEW_PORT_MODE='custom'; NEW_IKE_PORT="$DEFAULT_IKE_PORT"; NEW_NATT_PORT="$suggested"
             ;;
         standard)
-            if ! standard_transport_available; then
-                owner=$(profile_using_port 500 2>/dev/null || profile_using_port 4500 2>/dev/null || true)
-                [[ -n "$owner" ]] && die "Standard UDP 500/4500 is already assigned to profile '${owner}'."
-                die 'Standard UDP 500/4500 is already used by another local service.'
-            fi
-            NEW_PORT_MODE='standard'; NEW_IKE_PORT=500; NEW_NATT_PORT=4500
+            die 'Standard UDP 500/4500 support was removed. Use auto or a custom UDP port.'
             ;;
-        *[!0-9]* ) die "Invalid port selection '${request}'. Use auto, standard, or a number from ${PROFILE_PORT_MIN}-${PROFILE_PORT_MAX}." ;;
+        *[!0-9]* )
+            die "Invalid port selection '${request}'. Use auto or a number from ${PROFILE_PORT_MIN}-${PROFILE_PORT_MAX}."
+            ;;
         *)
             validate_uint_range "$request" "$PROFILE_PORT_MIN" "$PROFILE_PORT_MAX" || \
                 die "Custom ports must be between ${PROFILE_PORT_MIN} and ${PROFILE_PORT_MAX}."
@@ -3280,60 +3361,32 @@ resolve_requested_transport() {
                 die "UDP ${request} is already assigned to profile '${owner}'."
             fi
             udp_port_in_use_live "$request" && die "UDP ${request} is already in use by another local service."
-            NEW_PORT_MODE='custom'; NEW_IKE_PORT=500; NEW_NATT_PORT="$request"
+            NEW_PORT_MODE='custom'; NEW_IKE_PORT="$DEFAULT_IKE_PORT"; NEW_NATT_PORT="$request"
             ;;
     esac
 }
 
 choose_transport_interactive() {
-    local choice suggested owner entered
+    local choice suggested entered owner
     section_title 'Transport selection'
-    if standard_transport_available; then
-        cat >"$TTY_OUT" <<EOF_PORT_SELECT
-  ${C_GREEN}[OK]${C_RESET} Standard IKEv2 transport is available.
-
-  Suggested transport:
-    UDP 500  - IKE
-    UDP 4500 - NAT-T and encrypted ESP-in-UDP
-
-  ${C_GREEN}1)${C_RESET} Use suggested standard ports
-  ${C_CYAN}2)${C_RESET} Enter a custom direct UDP port
-  ${C_RED}0)${C_RESET} Cancel
-EOF_PORT_SELECT
-        choice=$(prompt_default 'Select an option' '1')
-        case "$choice" in
-            1|'') resolve_requested_transport standard; return 0 ;;
-            2) ;;
-            0) return 1 ;;
-            *) warn 'Invalid selection.'; return 1 ;;
-        esac
-        suggested=$(find_next_custom_port) || die 'No custom UDP port is available.'
-    else
-        owner=$(profile_using_port 500 2>/dev/null || profile_using_port 4500 2>/dev/null || true)
-        suggested=$(find_next_custom_port) || die 'No custom UDP port is available.'
-        if [[ -n "$owner" ]]; then
-            print_check warn 'Standard UDP 500/4500' "assigned to ${owner}"
-        else
-            print_check warn 'Standard UDP 500/4500' 'used by another local service'
-        fi
-        cat >"$TTY_OUT" <<EOF_PORT_SELECT
-
-  Suggested transport:
-    Custom direct UDP ${suggested}
-    This one port carries IKE, NAT-T and encrypted ESP-in-UDP.
+    suggested=$(find_next_custom_port) || die 'No custom UDP port is available.'
+    cat >"$TTY_OUT" <<EOF_PORT_SELECT
+    ${C_MAGENTA}Port Selection${C_RESET}
+    Select a dedicated UDP port for the connection.
+    The selected port handles tunnel setup and all encrypted relay traffic.
+    Standard IPsec ports are not used.
 
   ${C_GREEN}1)${C_RESET} Use suggested port ${suggested}
   ${C_CYAN}2)${C_RESET} Enter another custom UDP port
   ${C_RED}0)${C_RESET} Cancel
 EOF_PORT_SELECT
-        choice=$(prompt_default 'Select an option' '1')
-        case "$choice" in
-            1|'') resolve_requested_transport "$suggested"; return 0 ;;
-            2) ;;
-            0) return 1 ;;
-            *) warn 'Invalid selection.'; return 1 ;;
-        esac
-    fi
+    choice=$(prompt_default 'Select an option' '1')
+    case "$choice" in
+        1|'') resolve_requested_transport "$suggested"; return 0 ;;
+        2) ;;
+        0) return 1 ;;
+        *) warn 'Invalid selection.'; return 1 ;;
+    esac
 
     while true; do
         entered=$(prompt_default "Custom UDP port (${PROFILE_PORT_MIN}-${PROFILE_PORT_MAX})" "$suggested")
@@ -3427,8 +3480,6 @@ except Exception:
     pass
 
 for subnet in pool.subnets(new_prefix=30):
-    if subnet.network_address == pool.network_address:
-        continue
     if any(subnet.overlaps(other) for other in used):
         continue
     print(subnet.with_prefixlen)
@@ -3464,29 +3515,30 @@ write_hub_host_config() {
 
 write_hub_readme() {
     cat >"$MANAGED_README" <<'EOF_HUB_README'
-Dragon Fruit Relay 2.x managed directory
-========================================
+Dragon Fruit Relay 2.0.2 managed directory
+==========================================
 
-This node is an egress hub. Each directory below clients/ is a completely
-independent ingress connection with its own PSK, UDP listener, charon-systemd
-process, VICI socket, XFRM interface, XFRM ID, /30 tunnel and firewall rules.
+This node is an egress hub. Each directory below clients/ is an independent
+custom-port connection with its own PSK, UDP listener, charon-systemd process,
+VICI socket, dfrNNNN XFRM interface, XFRM ID and /30 tunnel.
 
-Authoritative files:
+Authoritative profile files:
   /etc/dragonfruit-relay/clients/<name>/profile.conf
   /etc/dragonfruit-relay/clients/<name>/swanctl.conf
   /etc/dragonfruit-relay/clients/<name>/strongswan.conf
   /etc/dragonfruit-relay/clients/<name>/pairing-token.txt
 
-Canonical strongSwan integration:
+Canonical strongSwan runtime copies:
   /etc/swanctl/dragonfruit-relay/<name>/swanctl.conf
   /etc/strongswan.d/dragonfruit-relay/<name>.conf
 
-The canonical configuration files are symbolic links to the authoritative
-profile files. Standard credential directories are real directories below each
-/etc/swanctl/dragonfruit-relay/<name>/ directory.
+The canonical swanctl tree contains real files and credential directories.
+No runtime configuration or credential path is a symlink into
+/etc/dragonfruit-relay. This keeps Debian AppArmor traversal deterministic.
 
-Run `dragon-fruit-relay` for the interactive shell or use
-`dragon-fruit-relay client --help` for automation.
+Only token version 6, dfrNNNN interfaces and custom UDP ports are generated.
+Token version 5 custom-port profiles are upgraded when imported; standard-port
+or legacy xfrm* installations must be removed and recreated.
 EOF_HUB_README
     chmod 0640 "$MANAGED_README"
 }
@@ -3501,6 +3553,11 @@ name="${1:?profile name required}"
 [[ "$name" =~ ^[a-z0-9][a-z0-9_-]{0,31}$ ]] || exit 2
 # shellcheck disable=SC1090
 source "/etc/dragonfruit-relay/clients/${name}/profile.conf"
+[[ "$XFRM_IF" =~ ^dfr[0-9]{4}$ ]] || { echo "Unsupported XFRM interface name: $XFRM_IF" >&2; exit 1; }
+dfr_index=$((10#${XFRM_IF#dfr}))
+expected_id=$((1000 + dfr_index))
+[[ "$XFRM_ID" == "$expected_id" ]] || { echo "XFRM ID $XFRM_ID does not match $XFRM_IF (expected $expected_id)" >&2; exit 1; }
+[[ "${PORT_MODE:-}" == custom ]] || { echo "Only custom UDP transport is supported" >&2; exit 1; }
 if ip link show dev "$XFRM_IF" >/dev/null 2>&1; then
     details=$(ip -d link show dev "$XFRM_IF")
     grep -q 'xfrm' <<<"$details" || { echo "$XFRM_IF is not an XFRM interface" >&2; exit 1; }
@@ -3525,8 +3582,11 @@ name="${1:?profile name required}"
 [[ "$name" =~ ^[a-z0-9][a-z0-9_-]{0,31}$ ]] || exit 2
 # shellcheck disable=SC1090
 source "/etc/dragonfruit-relay/clients/${name}/profile.conf"
-install -d -m 0755 /run/dragonfruit-relay
-rm -f -- "$VICI_SOCKET"
+rm -f -- "$VICI_SOCKET" "${VICI_SOCKET%.vici}.dck" "${VICI_SOCKET%.vici}.ctl" "${VICI_SOCKET%.vici}.wlst"
+# Remove sockets created by the public v2.0.1 layout during an in-place repair.
+rm -f -- "/run/dragonfruit-relay/${name}.vici" "/run/dragonfruit-relay/${name}.dck" \
+    "/run/dragonfruit-relay/${name}.ctl" "/run/dragonfruit-relay/${name}.wlst"
+rmdir /run/dragonfruit-relay 2>/dev/null || true
 daemon=$(command -v charon-systemd 2>/dev/null || true)
 [[ -n "$daemon" ]] || daemon=/usr/lib/ipsec/charon-systemd
 [[ -x "$daemon" ]] || { echo 'charon-systemd executable not found' >&2; exit 1; }
@@ -3561,6 +3621,9 @@ source "$file"
 swanctl --terminate --uri "$VICI_URI" --ike dragonfruit_relay >/dev/null 2>&1 || true
 ip link set "$XFRM_IF" down >/dev/null 2>&1 || true
 rm -f -- "$VICI_SOCKET" "${VICI_SOCKET%.vici}.dck" "${VICI_SOCKET%.vici}.ctl" "${VICI_SOCKET%.vici}.wlst"
+rm -f -- "/run/dragonfruit-relay/${name}.vici" "/run/dragonfruit-relay/${name}.dck" \
+    "/run/dragonfruit-relay/${name}.ctl" "/run/dragonfruit-relay/${name}.wlst"
+rmdir /run/dragonfruit-relay 2>/dev/null || true
 EOF_HELPER
     chmod 0750 "$HUB_BIN_DIR"/*
 
@@ -3593,6 +3656,15 @@ EOF_UNIT
 write_client_profile() {
     local name="$1"
     local dir
+
+    # Every 2.0.2 hub profile is custom-port and dfr-only. Public 2.0.1
+    # custom profiles stored IKE_PORT=500 even though the isolated responder
+    # only needs its direct NAT-T socket; normalize that legacy metadata while
+    # rewriting profile.conf during repair or automatic upgrade.
+    [[ "${PORT_MODE:-}" == custom ]] || die "Profile '${name}' is not custom-port and cannot be written by Dragon Fruit Relay ${APP_VERSION}."
+    validate_dfr_interface_identity "${XFRM_IF:-}" "${XFRM_ID:-}" ||         die "Profile '${name}' does not use a valid dfrNNNN interface and matching XFRM ID."
+    IKE_PORT="$DEFAULT_IKE_PORT"
+
     dir=$(profile_dir "$name")
     install -d -m 0700 "$dir"
     VICI_SOCKET=$(profile_vici_socket "$name")
@@ -3631,36 +3703,57 @@ write_client_profile() {
     chmod 600 "$dir/profile.conf"
 }
 
+prepare_client_strongswan_layout() {
+    local name="$1" canonical target
+    canonical=$(profile_strongswan_canonical "$name")
+    install -d -m 0750 "$STRONGSWAN_CLIENT_ROOT"
+
+    if [[ -L "$canonical" ]]; then
+        target=$(readlink -f -- "$canonical" 2>/dev/null || readlink -- "$canonical" 2>/dev/null || true)
+        case "$target" in
+            "$CONFIG_DIR"/*) rm -f -- "$canonical" ;;
+            *) die "Refusing to replace unmanaged strongSwan configuration: ${canonical}" ;;
+        esac
+    elif [[ -e "$canonical" && ! -f "$canonical" ]]; then
+        die "Canonical strongSwan path is not a regular file: ${canonical}"
+    elif [[ -f "$canonical" ]] && ! grep -q '^# Managed by Dragon Fruit Relay ' "$canonical" 2>/dev/null; then
+        die "Refusing to replace unmanaged strongSwan configuration: ${canonical}"
+    fi
+}
+
+install_client_canonical_copy() {
+    local source="$1" destination="$2" temporary
+    temporary="${destination}.tmp.$$"
+    [[ -f "$source" ]] || die "Cannot install missing managed source: ${source}"
+    install -m 0600 "$source" "$temporary"
+    mv -f -- "$temporary" "$destination"
+}
+
 write_client_strongswan() {
-    local name="$1" source canonical port_lines
+    local name="$1" source canonical
     source=$(profile_strongswan_source "$name")
     canonical=$(profile_strongswan_canonical "$name")
-    if [[ "$PORT_MODE" == standard ]]; then
-        port_lines="    port = 500
-    port_nat_t = 4500"
-    else
-        port_lines="    port = 0
-    port_nat_t = ${NATT_PORT}"
-    fi
+    VICI_SOCKET="${VICI_SOCKET:-$(profile_vici_socket "$name")}"
+    VICI_URI="${VICI_URI:-$(profile_vici_uri "$name")}"
+    [[ "$PORT_MODE" == custom ]] || die "Profile '${name}' uses removed standard-port transport. Recreate it."
+    [[ "$XFRM_IF" =~ ^dfr[0-9]{4}$ ]] || die "Profile '${name}' uses removed legacy XFRM naming. Recreate it."
+
     cat >"$source" <<EOF_STRONGSWAN
 # Managed by Dragon Fruit Relay ${APP_VERSION}.
 # Profile: ${name}
-# Plugin defaults from the Debian package are included explicitly because this
-# daemon runs with an isolated STRONGSWAN_CONF file.
 include /etc/strongswan.d/charon/*.conf
 include /etc/strongswan.d/charon-systemd*.conf
 
 charon {
-${port_lines}
+    # The responder listens only on the assigned custom NAT-T socket.
+    port = 0
+    port_nat_t = ${NATT_PORT}
     install_routes = no
 
     plugins {
         vici {
             socket = ${VICI_URI}
         }
-        # Route-based XFRM profiles require the kernel-netlink backend.
-        # The optional kernel-libipsec backend creates a shared TUN device
-        # (for example ipsec0), which conflicts with isolated XFRM instances.
         kernel-libipsec {
             load = no
         }
@@ -3668,8 +3761,6 @@ ${port_lines}
             load = yes
             install_routes_xfrmi = no
         }
-        # These optional plugins install shared host-wide policies or hooks and
-        # are unnecessary for isolated responder instances.
         bypass-lan {
             load = no
         }
@@ -3679,54 +3770,111 @@ ${port_lines}
         resolve {
             load = no
         }
-        # Avoid control-socket collisions if optional plugins are installed.
+        # The isolated daemon is controlled exclusively through VICI.
+        # Disable optional legacy/shared control plugins instead of creating
+        # additional sockets or host-wide duplicate-check state.
         duplicheck {
-            socket = unix:///run/dragonfruit-relay/${name}.dck
+            load = no
         }
         stroke {
-            socket = unix:///run/dragonfruit-relay/${name}.ctl
+            load = no
         }
         whitelist {
-            socket = unix:///run/dragonfruit-relay/${name}.wlst
+            load = no
         }
     }
 }
 EOF_STRONGSWAN
     chmod 0600 "$source"
-    ensure_managed_symlink "$source" "$canonical"
+    prepare_client_strongswan_layout "$name"
+    install_client_canonical_copy "$source" "$canonical"
 }
 
-write_client_swanctl() {
-    local name="$1" source canonical canonical_dir credential_dir
-    source=$(profile_swanctl_source "$name")
-    canonical=$(profile_swanctl_canonical "$name")
+prepare_client_swanctl_layout() {
+    local name="$1" canonical_dir canonical marker path target credential_dir unknown=''
     canonical_dir=$(profile_swanctl_dir "$name")
-    if [[ -d "$canonical_dir" && ! -e "$canonical_dir/.dragonfruit-relay-profile" ]]; then
-        if find "$canonical_dir" -mindepth 1 -maxdepth 1 -print -quit 2>/dev/null | grep -q .; then
-            die "Refusing to modify unmanaged swanctl profile directory: ${canonical_dir}"
-        fi
+    canonical=$(profile_swanctl_canonical "$name")
+    marker="${canonical_dir}/.dragonfruit-relay-profile"
+
+    install -d -m 0755 "$SWANCTL_CLIENT_ROOT"
+    if [[ -L "$canonical_dir" ]]; then
+        target=$(readlink -f -- "$canonical_dir" 2>/dev/null || readlink -- "$canonical_dir" 2>/dev/null || true)
+        case "$target" in
+            "$CONFIG_DIR"/*) rm -f -- "$canonical_dir" ;;
+            *) die "Refusing to replace unmanaged swanctl directory: ${canonical_dir}" ;;
+        esac
     elif [[ -e "$canonical_dir" && ! -d "$canonical_dir" ]]; then
         die "Canonical swanctl profile path is not a directory: ${canonical_dir}"
     fi
+
+    if [[ -d "$canonical_dir" && ! -e "$marker" ]]; then
+        while IFS= read -r path; do
+            case "$(basename "$path")" in
+                swanctl.conf)
+                    if [[ -L "$path" ]]; then
+                        target=$(readlink -f -- "$path" 2>/dev/null || readlink -- "$path" 2>/dev/null || true)
+                        [[ "$target" == "$CONFIG_DIR"/* ]] || unknown="$path"
+                    elif [[ -f "$path" ]] && grep -q '^# Managed by Dragon Fruit Relay ' "$path" 2>/dev/null; then
+                        :
+                    else
+                        unknown="$path"
+                    fi
+                    ;;
+                x509|x509ca|x509ocsp|x509aa|x509ac|x509crl|pubkey|private|rsa|ecdsa|pkcs8|pkcs12)
+                    if [[ -L "$path" ]]; then
+                        target=$(readlink -f -- "$path" 2>/dev/null || readlink -- "$path" 2>/dev/null || true)
+                        [[ "$target" == "$CONFIG_DIR"/* ]] || unknown="$path"
+                    elif [[ -d "$path" ]] && ! find "$path" -mindepth 1 -print -quit 2>/dev/null | grep -q .; then
+                        :
+                    else
+                        unknown="$path"
+                    fi
+                    ;;
+                *) unknown="$path" ;;
+            esac
+            [[ -z "$unknown" ]] || break
+        done < <(find "$canonical_dir" -mindepth 1 -maxdepth 1 -print 2>/dev/null)
+        [[ -z "$unknown" ]] || die "Refusing to replace unmanaged swanctl content: ${unknown}"
+    fi
+
     install -d -m 0750 "$canonical_dir"
-    : >"$canonical_dir/.dragonfruit-relay-profile"
-    chmod 0640 "$canonical_dir/.dragonfruit-relay-profile"
+    : >"$marker"
+    chmod 0640 "$marker"
+
+    if [[ -L "$canonical" ]]; then
+        target=$(readlink -f -- "$canonical" 2>/dev/null || readlink -- "$canonical" 2>/dev/null || true)
+        case "$target" in
+            "$CONFIG_DIR"/*) rm -f -- "$canonical" ;;
+            *) die "Refusing to replace unmanaged swanctl configuration: ${canonical}" ;;
+        esac
+    elif [[ -e "$canonical" && ! -f "$canonical" ]]; then
+        die "Canonical swanctl configuration is not a regular file: ${canonical}"
+    elif [[ -f "$canonical" ]] && ! grep -q '^# Managed by Dragon Fruit Relay ' "$canonical" 2>/dev/null; then
+        die "Refusing to replace unmanaged swanctl configuration: ${canonical}"
+    fi
+
     for credential_dir in x509 x509ca x509ocsp x509aa x509ac x509crl pubkey private rsa ecdsa pkcs8 pkcs12; do
-        local credential_source="$(profile_dir "$name")/$credential_dir"
-        local credential_link="$canonical_dir/$credential_dir"
-        install -d -m 0700 "$credential_source"
-        if [[ -e "$credential_link" || -L "$credential_link" ]]; then
-            if [[ -L "$credential_link" && "$(readlink -f -- "$credential_link" 2>/dev/null || true)" == "$(readlink -f -- "$credential_source")" ]]; then
-                continue
-            fi
-            if [[ -d "$credential_link" ]] && ! find "$credential_link" -mindepth 1 -print -quit 2>/dev/null | grep -q .; then
-                rmdir "$credential_link"
-            else
-                die "Refusing to replace unmanaged credential path: ${credential_link}"
-            fi
+        path="${canonical_dir}/${credential_dir}"
+        if [[ -L "$path" ]]; then
+            target=$(readlink -f -- "$path" 2>/dev/null || readlink -- "$path" 2>/dev/null || true)
+            case "$target" in
+                "$CONFIG_DIR"/*) rm -f -- "$path" ;;
+                *) die "Refusing to replace unmanaged credential link: ${path}" ;;
+            esac
+        elif [[ -e "$path" && ! -d "$path" ]]; then
+            die "Credential path is not a directory: ${path}"
         fi
-        ln -s "$credential_source" "$credential_link"
+        install -d -m 0700 "$path"
     done
+}
+
+write_client_swanctl() {
+    local name="$1" source canonical
+    source=$(profile_swanctl_source "$name")
+    canonical=$(profile_swanctl_canonical "$name")
+    [[ "$PORT_MODE" == custom ]] || die "Profile '${name}' uses removed standard-port transport. Recreate it."
+
+    prepare_client_swanctl_layout "$name"
     cat >"$source" <<EOF_SWANCTL
 # Managed by Dragon Fruit Relay ${APP_VERSION}.
 # Egress hub profile: ${name}
@@ -3740,7 +3888,6 @@ connections {
         fragmentation = yes
         dpd_delay = 20s
         reauth_time = 0s
-
         local {
             auth = psk
             id = ${EGRESS_ID}
@@ -3771,23 +3918,25 @@ secrets {
 }
 EOF_SWANCTL
     chmod 0600 "$source"
-    ensure_managed_symlink "$source" "$canonical"
+    install_client_canonical_copy "$source" "$canonical"
 }
 
 generate_client_token() {
     local name="$1" payload token token_path
     load_client_profile "$name"
+    [[ "$PORT_MODE" == custom ]] || die "Profile '${name}' uses removed standard UDP transport. Recreate it."
+    [[ "$XFRM_IF" =~ ^dfr[0-9]{4}$ ]] || die "Profile '${name}' uses removed legacy XFRM naming. Recreate it."
     payload=$(cat <<EOF_TOKEN
 TOKEN_VERSION=${PROFILE_TOKEN_VERSION}
 PROFILE_NAME=${PROFILE_NAME}
 EXIT_PUBLIC_IP=${PUBLIC_IP}
-PORT_MODE=${PORT_MODE}
-IKE_PORT=${IKE_PORT}
+PORT_MODE=custom
+IKE_PORT=0
 NATT_PORT=${NATT_PORT}
 PSK=${PSK}
 TUNNEL_CIDR=${TUNNEL_CIDR}
 XFRM_ID=${XFRM_ID}
-INGRESS_XFRM_IF=xfrm0
+INGRESS_XFRM_IF=${XFRM_IF}
 EGRESS_XFRM_IF=${XFRM_IF}
 XFRM_MTU=${XFRM_MTU}
 INGRESS_XFRM_CIDR=${INGRESS_XFRM_CIDR}
@@ -3814,13 +3963,14 @@ show_client_token() {
     load_client_profile "$name"
     cat >"$TTY_OUT" <<EOF_TOKEN_OUT
 
-${C_BOLD}${C_MAGENTA}PAIRING TOKEN — ${name}${C_RESET}
+${C_BOLD}${C_MAGENTA}PAIRING TOKEN v${PROFILE_TOKEN_VERSION} — ${name}${C_RESET}
 ${C_YELLOW}This token contains the pre-shared key. Treat it like a password.${C_RESET}
-Transport: $(if [[ "$PORT_MODE" == standard ]]; then printf 'UDP 500 + UDP 4500'; else printf 'UDP %s (custom direct)' "$NATT_PORT"; fi)
+Transport: UDP ${NATT_PORT} (custom direct)
+Interface: ${XFRM_IF} (ID ${XFRM_ID})
 
 ${C_BOLD}${token}${C_RESET}
 
-Paste the complete line into Dragon Fruit Relay 2.x on the ingress node.
+Paste the complete line into Dragon Fruit Relay ${APP_VERSION} on the ingress node.
 Protected copy: $(profile_token_file "$name")
 EOF_TOKEN_OUT
 }
@@ -3863,13 +4013,23 @@ remove_client_network_rules() {
 }
 
 profile_listener_ok() {
-    local name="$1"
+    local name="$1" unit main_pid
     load_client_profile "$name"
-    if [[ "$PORT_MODE" == standard ]]; then
-        udp_listener_exists 500 && udp_listener_exists 4500
-    else
-        udp_listener_exists "$NATT_PORT"
-    fi
+    [[ "$PORT_MODE" == custom ]] || return 1
+    unit=$(profile_service "$name")
+    main_pid=$(systemctl show "$unit" -p MainPID --value 2>/dev/null | tr -d '[:space:]' || true)
+    [[ "$main_pid" =~ ^[1-9][0-9]*$ ]] || return 1
+
+    # Do not accept a listener owned by an unrelated process that happened to
+    # bind the configured port. The socket must belong to this unit's daemon.
+    ss -H -lunp 2>/dev/null | awk -v suffix=":${NATT_PORT}" -v pid="$main_pid" '
+        $0 ~ ("pid=" pid "([,)]|$)") {
+            for (i = 1; i <= NF; i++) {
+                if ($i ~ suffix "$") found=1
+            }
+        }
+        END { exit(found ? 0 : 1) }
+    '
 }
 
 client_swanctl() {
@@ -3913,7 +4073,7 @@ stop_hub_client() {
     fi
     load_client_profile "$name"
     delete_link_bounded "$XFRM_IF" || true
-    rm -f -- "$VICI_SOCKET"
+    cleanup_profile_runtime_sockets "$name" "$VICI_SOCKET"
 }
 
 client_status_word() {
@@ -3938,14 +4098,28 @@ client_status_word() {
 }
 
 remove_client_files() {
-    local name="$1" canonical_dir canonical_strong expected_strong
+    local name="$1" canonical_dir canonical_strong config_file configured_socket=''
     canonical_dir=$(profile_swanctl_dir "$name")
     canonical_strong=$(profile_strongswan_canonical "$name")
-    expected_strong=$(profile_strongswan_source "$name")
+    config_file=$(profile_config_file "$name")
+    if [[ -r "$config_file" ]]; then
+        configured_socket=$(
+            set +u
+            # shellcheck disable=SC1090
+            source "$config_file"
+            printf '%s' "${VICI_SOCKET:-}"
+        )
+    fi
+    cleanup_profile_runtime_sockets "$name" "$configured_socket"
+
     if [[ -e "$canonical_dir/.dragonfruit-relay-profile" ]]; then
         rm -rf -- "$canonical_dir"
     fi
-    if [[ -L "$canonical_strong" && "$(readlink -f -- "$canonical_strong" 2>/dev/null || true)" == "$(readlink -f -- "$expected_strong" 2>/dev/null || true)" ]]; then
+    if [[ -L "$canonical_strong" ]]; then
+        local target
+        target=$(readlink -f -- "$canonical_strong" 2>/dev/null || readlink -- "$canonical_strong" 2>/dev/null || true)
+        [[ "$target" == "$CONFIG_DIR"/* ]] && rm -f -- "$canonical_strong"
+    elif [[ -f "$canonical_strong" ]] && grep -q "^# Profile: ${name}$" "$canonical_strong" 2>/dev/null; then
         rm -f -- "$canonical_strong"
     fi
     rm -rf -- "$(profile_dir "$name")"
@@ -3961,7 +4135,7 @@ remove_hub_client() {
     remove_client_files "$name"
     systemctl daemon-reload >/dev/null 2>&1 || true
     delete_link_bounded "$old_if" || true
-    rm -f -- "$old_socket"
+    cleanup_profile_runtime_sockets "$name" "$old_socket"
     if ip link show dev "$old_if" >/dev/null 2>&1 || [[ -e "$(profile_dir "$name")" ]]; then
         die "Client '${name}' removal could not be verified."
     fi
@@ -3969,16 +4143,30 @@ remove_hub_client() {
 }
 
 repair_hub_client() {
-    local name="$1"
+    local name="$1" unit old_socket
     load_host_config
+    load_client_profile "$name"
+    profile_current_design_ok "$name" || die "Profile '${name}' uses removed standard-port or legacy-XFRM state. Remove it and create a new connection."
+    unit=$(profile_service "$name")
+    old_socket="${VICI_SOCKET:-}"
+
+    # Stop while the old profile still exists so ExecStopPost can address the
+    # old VICI socket. Then rewrite profile.conf with the AppArmor-safe path.
+    timeout 25s systemctl stop "$unit" >/dev/null 2>&1 || true
+    cleanup_profile_runtime_sockets "$name" "$old_socket"
+    write_client_profile "$name"
     load_client_profile "$name"
     write_client_strongswan "$name"
     write_client_swanctl "$name"
     generate_client_token "$name" >/dev/null
     systemctl daemon-reload
-    systemctl restart "$(profile_service "$name")" >>"$LOG_FILE" 2>&1 || {
+    systemctl restart "$unit" >>"$LOG_FILE" 2>&1 || {
         error "Client '${name}' failed after repair."
-        journalctl -u "$(profile_service "$name")" -n 100 --no-pager >"$TTY_OUT" || true
+        journalctl -u "$unit" -n 100 --no-pager >"$TTY_OUT" || true
+        return 1
+    }
+    profile_listener_ok "$name" || {
+        error "Client '${name}' restarted but its custom UDP listener is missing."
         return 1
     }
     apply_client_network_rules "$name"
@@ -4025,30 +4213,42 @@ prepare_new_client_resources() {
 
 create_hub_client() {
     local name="$1" requested_port="${2:-interactive}" requested_tunnel="${3:-auto}"
+    local allocated_if allocated_socket
     load_host_config
     validate_profile_name "$name" || die "Invalid profile name '${name}'."
     profile_exists "$name" && die "Client profile '${name}' already exists."
+
+    remove_abandoned_dragonfruit_xfrm_links
     prepare_new_client_resources "$name" "$requested_port" "$requested_tunnel" || return 0
+    allocated_if="$XFRM_IF"
+    allocated_socket=$(profile_vici_socket "$name")
 
     section_title 'New client resources'
     print_check info 'Connection name' "$name"
-    print_check info 'Transport' "$(if [[ "$PORT_MODE" == standard ]]; then printf 'UDP 500 + UDP 4500'; else printf 'UDP %s' "$NATT_PORT"; fi)"
+    print_check info 'Transport' "UDP ${NATT_PORT} (custom direct)"
     print_check info 'XFRM interface' "$XFRM_IF (ID $XFRM_ID)"
     print_check info 'Tunnel network' "$TUNNEL_CIDR"
 
     if ! (
-        write_client_profile "$name"
-        load_client_profile "$name"
-        write_client_strongswan "$name"
-        write_client_swanctl "$name"
-        generate_client_token "$name" >/dev/null
+        write_client_profile "$name" &&
+        load_client_profile "$name" &&
+        write_client_strongswan "$name" &&
+        write_client_swanctl "$name" &&
+        generate_client_token "$name" >/dev/null &&
         start_hub_client "$name"
     ); then
         warn "Client '${name}' setup failed; removing only that incomplete profile."
-        systemctl disable --now "$(profile_service "$name")" >/dev/null 2>&1 || true
+        timeout 25s systemctl disable --now "$(profile_service "$name")" >/dev/null 2>&1 || true
         remove_client_network_rules "$name" || true
+        cleanup_profile_runtime_sockets "$name" "$allocated_socket"
+        if ! delete_link_bounded "$allocated_if"; then
+            warn "Could not delete incomplete XFRM interface ${allocated_if}."
+        fi
         remove_client_files "$name"
         systemctl daemon-reload >/dev/null 2>&1 || true
+        if ip link show dev "$allocated_if" >/dev/null 2>&1; then
+            error "Rollback left XFRM interface ${allocated_if} behind."
+        fi
         return 1
     fi
     show_client_token "$name"
@@ -4076,7 +4276,10 @@ rollback_hub_initialization() {
     rm -f "$CLIENT_UNIT_TEMPLATE"
     [[ -e "$SWANCTL_CLIENT_ROOT/.dragonfruit-relay-root" ]] && rm -rf "$SWANCTL_CLIENT_ROOT" || true
     [[ -e "$STRONGSWAN_CLIENT_ROOT/.dragonfruit-relay-root" ]] && rm -rf "$STRONGSWAN_CLIENT_ROOT" || true
+    remove_residual_runtime_namespaces
     rm -rf "$CONFIG_DIR"
+    remove_abandoned_dragonfruit_xfrm_links yes
+    remove_legacy_dragonfruit_xfrm_links
     restore_pre_routevpn_state egress || true
     systemctl daemon-reload >/dev/null 2>&1 || true
     success 'Hub rollback completed.'
@@ -4090,7 +4293,7 @@ setup_egress_hub() {
         die 'This server is already configured as an ingress client. Remove the ingress configuration before initializing an egress hub.'
     fi
     if legacy_single_configured; then
-        die 'A Dragon Fruit Relay 1.x configuration exists. Use the migration option first.'
+        die 'An unsupported xfrm/default-port installation exists. Remove it and create new token v6 connections.'
     fi
 
     clean_abandoned_install_before_setup
@@ -4115,12 +4318,12 @@ setup_egress_hub() {
     backup_egress_runtime_sysctls
 
     if ! (
-        ensure_hub_layout
-        write_hub_host_config
-        write_hub_readme
-        install_self_copy
-        write_hub_helpers
-        systemctl disable --now strongswan.service >/dev/null 2>&1 || true
+        ensure_hub_layout &&
+        write_hub_host_config &&
+        write_hub_readme &&
+        install_self_copy &&
+        write_hub_helpers &&
+        { systemctl disable --now strongswan.service >/dev/null 2>&1 || true; } &&
         write_hub_sysctl
     ); then
         rollback_hub_initialization
@@ -4181,8 +4384,11 @@ remove_egress_hub() {
     rm -f "$CLIENT_UNIT_TEMPLATE"
     [[ -e "$SWANCTL_CLIENT_ROOT/.dragonfruit-relay-root" ]] && rm -rf "$SWANCTL_CLIENT_ROOT" || true
     [[ -e "$STRONGSWAN_CLIENT_ROOT/.dragonfruit-relay-root" ]] && rm -rf "$STRONGSWAN_CLIENT_ROOT" || true
+    remove_residual_runtime_namespaces
     [[ -L "$SYSCTL_FILE" && "$(readlink -f "$SYSCTL_FILE" 2>/dev/null || true)" == "$SYSCTL_MANAGED_FILE" ]] && rm -f "$SYSCTL_FILE" || true
     rm -rf "$CONFIG_DIR"
+    remove_abandoned_dragonfruit_xfrm_links yes
+    remove_legacy_dragonfruit_xfrm_links
     restore_pre_routevpn_state egress
     systemctl daemon-reload >/dev/null 2>&1 || true
     if [[ "$complete" == yes ]]; then
@@ -4234,126 +4440,55 @@ rollback_legacy_migration() {
 }
 
 migrate_legacy_egress() {
-    legacy_single_configured || die 'No legacy Dragon Fruit Relay configuration was found.'
-    [[ "$(legacy_config_role)" == egress ]] || die 'The legacy node is not an egress node.'
-    local name="${1:-}" snapshot old_config
-    if [[ -z "$name" ]]; then
-        name=$(prompt_default 'Name for the existing connection' 'legacy-client')
-        name=$(normalize_profile_name "$name")
-    fi
-    validate_profile_name "$name" || die 'Invalid migration profile name.'
-    snapshot="${STATE_DIR}/migration-v1-$(date +%Y%m%d-%H%M%S)"
-    snapshot_legacy_installation "$snapshot"
-    old_config="$snapshot/legacy.conf"
-    cp -a "$CONFIG_FILE" "$old_config"
-
-    # Load every legacy value before replacing the application tree.
-    load_config
-    local old_wan="$WAN_IF" old_local="$LOCAL_IP" old_public="$PUBLIC_IP"
-    local old_port_mode="$PORT_MODE" old_ike="$IKE_PORT" old_natt="$NATT_PORT"
-    local old_tunnel="$TUNNEL_CIDR" old_if="$XFRM_IF" old_id="$XFRM_ID" old_mtu="$XFRM_MTU"
-    local old_ingress_cidr="$INGRESS_XFRM_CIDR" old_egress_cidr="$EGRESS_XFRM_CIDR"
-    local old_ingress_ip="$INGRESS_XFRM_IP" old_egress_ip="$EGRESS_XFRM_IP"
-    local old_ingress_id="$INGRESS_ID" old_egress_id="$EGRESS_ID" old_psk="$PSK"
-    local old_dns1="$DNS_PRIMARY" old_dns2="$DNS_SECONDARY"
-
-    systemctl disable --now dragonfruit-relay-healthcheck.timer dragonfruit-relay-dns.service \
-        dragonfruit-relay-routing.service dragonfruit-relay-xfrm.service strongswan.service >/dev/null 2>&1 || true
-    remove_all_dragonfruit_network_rules || true
-    delete_link_bounded "$old_if" || true
-    rm -f "$SYSTEMD_DIR"/dragonfruit-relay-xfrm.service "$SYSTEMD_DIR"/dragonfruit-relay-routing.service \
-        "$SYSTEMD_DIR"/dragonfruit-relay-dns.service "$SYSTEMD_DIR"/dragonfruit-relay-healthcheck.service \
-        "$SYSTEMD_DIR"/dragonfruit-relay-healthcheck.timer "$SWANCTL_FILE" "$STRONGSWAN_ROUTE_FILE" "$STRONGSWAN_OVERRIDE_FILE"
-
-    WAN_IF="$old_wan"; LOCAL_IP="$old_local"; PUBLIC_IP="$old_public"
-    if ! (
-        ensure_hub_layout
-        write_hub_host_config
-        write_hub_readme
-        write_hub_helpers
-        write_hub_sysctl
-
-        PROFILE_INDEX=1; PORT_MODE="$old_port_mode"; IKE_PORT="$old_ike"; NATT_PORT="$old_natt"
-        TUNNEL_CIDR="$old_tunnel"; XFRM_IF="$old_if"; XFRM_ID="$old_id"; XFRM_MTU="$old_mtu"
-        INGRESS_XFRM_CIDR="$old_ingress_cidr"; EGRESS_XFRM_CIDR="$old_egress_cidr"
-        INGRESS_XFRM_IP="$old_ingress_ip"; EGRESS_XFRM_IP="$old_egress_ip"
-        INGRESS_ID="$old_ingress_id"; EGRESS_ID="$old_egress_id"; PSK="$old_psk"
-        DNS_PRIMARY="$old_dns1"; DNS_SECONDARY="$old_dns2"
-        write_client_profile "$name"
-        load_client_profile "$name"
-        write_client_strongswan "$name"
-        write_client_swanctl "$name"
-        generate_client_token "$name" >/dev/null
-        rm -f "$CONFIG_FILE"
-        rm -rf "$LIB_DIR" "$UNIT_DIR" "$RESOLVER_DIR"
-        rm -f "$TOKEN_FILE" "$LEGACY_TOKEN_FILE"
-        start_hub_client "$name"
-    ); then
-        rollback_legacy_migration "$snapshot"
-        return 1
-    fi
-    success "Legacy egress migrated to hub profile '${name}'."
-    print_check info 'Existing ingress' 'It may reconnect without changing its current configuration.'
-    show_client_token "$name"
+    warn 'Legacy single-egress migration is disabled in 2.0.2.'
+    die 'Remove the legacy xfrm/default-port installation, initialize a new hub, and create new custom-port connections.'
 }
 
 migrate_legacy_ingress() {
-    legacy_single_configured || die 'No legacy Dragon Fruit Relay configuration was found.'
-    [[ "$(legacy_config_role)" == ingress ]] || die 'The legacy node is not an ingress node.'
-    cp -a "$CONFIG_FILE" "${CONFIG_FILE}.pre-2.0.4"
-    if ! grep -q '^PROFILE_NAME=' "$CONFIG_FILE"; then
-        printf 'PROFILE_NAME=%q\n' 'legacy-peer' >>"$CONFIG_FILE"
-    fi
-    sed -i -E 's/^CONFIG_SCHEMA=.*/CONFIG_SCHEMA=5/; s/^MANAGED_BY_VERSION=.*/MANAGED_BY_VERSION=2.0.1/' "$CONFIG_FILE"
-    repair_current
-    success 'Legacy ingress upgraded in place to Dragon Fruit Relay 2.0.1 compatibility.'
+    warn 'Legacy ingress migration is disabled in 2.0.2.'
+    die 'Remove the legacy xfrm/default-port installation and pair again with a token version 6 connection.'
 }
 
 legacy_migration_menu() {
-    local role choice name
+    local role choice
     role=$(legacy_config_role)
+    quarantine_legacy_single_installation
     clear_screen; banner
-    section_title 'Previous Dragon Fruit Relay detected'
-    print_check info 'Detected role' "$role"
-    if [[ "$role" == egress ]]; then
-        cat >"$TTY_OUT" <<EOF_MIGRATE
-  ${C_GREEN}1)${C_RESET} Migrate the existing tunnel into the first named hub client
-  ${C_YELLOW}2)${C_RESET} Remove the old tunnel and create a new egress hub
+    section_title 'Unsupported legacy Dragon Fruit Relay detected'
+    print_check warn 'Detected role' "$role"
+    print_check warn 'Removed design' 'xfrm* interface naming and/or UDP 500/4500 transport'
+    printf '  The old runtime has been stopped and its managed legacy XFRM interface removed.\n' >"$TTY_OUT"
+    printf '  Create a new connection with a dfrNNNN interface, custom UDP port, and token v6.\n' >"$TTY_OUT"
+    cat >"$TTY_OUT" <<EOF_MIGRATE
+
+  ${C_GREEN}1)${C_RESET} Remove old state and configure a new ${role}
+  ${C_YELLOW}2)${C_RESET} Remove old Dragon Fruit Relay state only
+  ${C_RED}3)${C_RESET} Completely uninstall Dragon Fruit Relay
   ${C_RED}0)${C_RESET} Exit
 EOF_MIGRATE
-        choice=$(prompt_default 'Select an option' '1')
-        case "$choice" in
-            1|'') name=$(prompt_default 'Name for the existing connection' 'legacy-client'); migrate_legacy_egress "$(normalize_profile_name "$name")" ;;
-            2) remove_tunnel_configuration yes; setup_egress_hub ;;
-            0) exit 0 ;;
-            *) warn 'Invalid selection.' ;;
-        esac
-    elif [[ "$role" == ingress ]]; then
-        cat >"$TTY_OUT" <<EOF_MIGRATE
-  ${C_GREEN}1)${C_RESET} Upgrade this ingress in place
-  ${C_YELLOW}2)${C_RESET} Remove it and configure a new ingress
-  ${C_RED}0)${C_RESET} Exit
-EOF_MIGRATE
-        choice=$(prompt_default 'Select an option' '1')
-        case "$choice" in
-            1|'') migrate_legacy_ingress ;;
-            2) remove_tunnel_configuration yes; setup_ingress ;;
-            0) exit 0 ;;
-            *) warn 'Invalid selection.' ;;
-        esac
-    else
-        die "Unknown legacy role: ${role}"
-    fi
+    choice=$(prompt_default 'Select an option' '1')
+    case "$choice" in
+        1|'')
+            remove_tunnel_configuration yes
+            if [[ "$role" == egress ]]; then setup_egress_hub; else setup_ingress; fi
+            ;;
+        2) remove_tunnel_configuration yes ;;
+        3) uninstall_routevpn ;;
+        0) exit 0 ;;
+        *) warn 'Invalid selection.' ;;
+    esac
 }
 
-# Pairing-token parser for legacy schema 1-4 and isolated profile schema 5.
+# Pairing-token parser for token v6 and custom-port token v5 conversion.
 parse_pairing_token() {
-    local token="$1" decoded
+    local token="$1" decoded expected_index expected_id
+    TOKEN_LEGACY_NOTICE=''
+    TOKEN_LEGACY_XFRM_IF=''
     token=$(printf '%s' "$token" | tr -d '[:space:]')
     decoded=$(printf '%s' "$token" | base64 -d 2>/dev/null) || die 'The pairing token is not valid Base64.'
 
-    local token_version='' profile_name='' exit_public_ip='' port_mode='standard'
-    local ike_port="$DEFAULT_IKE_PORT" natt_port="$DEFAULT_NATT_PORT" psk='' tunnel_cidr=''
+    local token_version='' profile_name='' exit_public_ip='' port_mode=''
+    local ike_port='' natt_port='' psk='' tunnel_cidr=''
     local xfrm_id='' legacy_xfrm_if='' ingress_xfrm_if='' egress_xfrm_if='' xfrm_mtu=''
     local ingress_xfrm_cidr='' egress_xfrm_cidr='' ingress_xfrm_ip='' egress_xfrm_ip=''
     local ingress_id='' egress_id='' dns_primary='' dns_secondary='' key value
@@ -4383,24 +4518,36 @@ parse_pairing_token() {
             DNS_SECONDARY) dns_secondary="$value" ;;
         esac
     done <<<"$decoded"
+
     token_version=${token_version#$'\xEF\xBB\xBF'}
-    case "$token_version" in 1|2|3|4|5) ;; '') die 'The pairing token does not contain TOKEN_VERSION.' ;; *) die "Unsupported pairing token version '${token_version}'." ;; esac
-    [[ "$port_mode" == standard || "$port_mode" == custom ]] || die 'Invalid transport mode in token.'
-    validate_udp_port "$ike_port" || die 'Invalid IKE port in token.'
-    validate_udp_port "$natt_port" || die 'Invalid NAT-T port in token.'
-    if [[ "$port_mode" == custom ]]; then
-        case "$token_version" in 4|5) ;; *) die 'This obsolete custom-port token must be regenerated on the egress node.' ;; esac
-        [[ "$ike_port" == "$DEFAULT_IKE_PORT" ]] || die 'Invalid custom token: IKE_PORT must remain at the internal default.'
-        [[ "$natt_port" != "$DEFAULT_IKE_PORT" ]] || die 'Invalid custom token: custom direct port may not be UDP 500.'
-    fi
+    case "$token_version" in
+        6) ;;
+        5)
+            TOKEN_LEGACY_NOTICE='Token v5 custom transport was accepted and converted to the dfr-only token v6 interface model.'
+            ;;
+        1|2|3|4)
+            die "Token version ${token_version} uses a removed legacy design. Create a new custom-port egress connection and token v6."
+            ;;
+        '') die 'The pairing token does not contain TOKEN_VERSION.' ;;
+        *) die "Unsupported pairing token version '${token_version}'. This release supports token v6 and custom-port token v5 conversion only." ;;
+    esac
+
+    validate_profile_name "$profile_name" || die 'Invalid or missing profile name in token.'
+    [[ "$port_mode" == custom ]] || die 'Standard UDP 500/4500 tokens are no longer supported. Recreate the egress connection with a custom UDP port.'
+    validate_uint_range "$natt_port" "$PROFILE_PORT_MIN" "$PROFILE_PORT_MAX" || die 'Invalid custom UDP port in token.'
+
     if [[ "$token_version" == 5 ]]; then
-        validate_profile_name "$profile_name" || die 'Invalid or missing profile name in token.'
-        validate_interface_name "$ingress_xfrm_if" || die 'Invalid ingress XFRM interface in token.'
+        [[ "$ike_port" == "$LEGACY_IKE_PORT" || "$ike_port" == "$DEFAULT_IKE_PORT" ]] || die 'Invalid token v5 IKE port.'
+        TOKEN_LEGACY_XFRM_IF="${ingress_xfrm_if:-${legacy_xfrm_if:-$LEGACY_XFRM_IF}}"
+        [[ "$egress_xfrm_if" =~ ^dfr[0-9]{4}$ ]] || die 'Token v5 does not contain a valid dfr egress interface. Recreate the egress connection.'
+        ingress_xfrm_if="$egress_xfrm_if"
     else
-        profile_name='legacy-peer'
-        ingress_xfrm_if="$legacy_xfrm_if"
-        egress_xfrm_if="$legacy_xfrm_if"
+        [[ "$ike_port" == "$DEFAULT_IKE_PORT" ]] || die 'Token v6 must disable the default IKE socket with IKE_PORT=0.'
+        [[ "$ingress_xfrm_if" =~ ^dfr[0-9]{4}$ ]] || die 'Invalid ingress dfr interface in token.'
+        [[ "$egress_xfrm_if" =~ ^dfr[0-9]{4}$ ]] || die 'Invalid egress dfr interface in token.'
+        [[ "$ingress_xfrm_if" == "$egress_xfrm_if" ]] || die 'Token v6 ingress and egress dfr interface names must match.'
     fi
+
     require_ipv4 'egress public IP' "$exit_public_ip"
     require_ipv4 'ingress XFRM IP' "$ingress_xfrm_ip"
     require_ipv4 'egress XFRM IP' "$egress_xfrm_ip"
@@ -4412,16 +4559,32 @@ parse_pairing_token() {
     validate_identity "$egress_id" || die 'Invalid egress identity in token.'
     [[ "$psk" =~ ^[A-Fa-f0-9]{64,128}$ ]] || die 'Invalid pre-shared key in token.'
     cidr_hosts "$tunnel_cidr" >/dev/null || die 'Invalid tunnel CIDR in token.'
+    [[ "$ingress_xfrm_cidr" == */30 && "$egress_xfrm_cidr" == */30 ]] || die 'Invalid XFRM CIDRs in token.'
+
+    expected_index=$((10#${egress_xfrm_if#dfr}))
+    ((expected_index >= 1 && expected_index <= 9999)) || die 'Invalid dfr interface index in token.'
+    expected_id=$((PROFILE_XFRM_ID_BASE + expected_index))
+    [[ "$xfrm_id" == "$expected_id" ]] || die "Token XFRM ID ${xfrm_id} does not match ${egress_xfrm_if} (expected ${expected_id})."
 
     TOKEN_PROFILE_NAME="$profile_name"
-    TOKEN_EXIT_PUBLIC_IP="$exit_public_ip"; TOKEN_PORT_MODE="$port_mode"
-    TOKEN_IKE_PORT="$ike_port"; TOKEN_NATT_PORT="$natt_port"; TOKEN_PSK="$psk"
-    TOKEN_TUNNEL_CIDR="$tunnel_cidr"; TOKEN_XFRM_ID="$xfrm_id"; TOKEN_XFRM_IF="$ingress_xfrm_if"
-    TOKEN_EGRESS_XFRM_IF="$egress_xfrm_if"; TOKEN_XFRM_MTU="$xfrm_mtu"
-    TOKEN_INGRESS_XFRM_CIDR="$ingress_xfrm_cidr"; TOKEN_EGRESS_XFRM_CIDR="$egress_xfrm_cidr"
-    TOKEN_INGRESS_XFRM_IP="$ingress_xfrm_ip"; TOKEN_EGRESS_XFRM_IP="$egress_xfrm_ip"
-    TOKEN_INGRESS_ID="$ingress_id"; TOKEN_EGRESS_ID="$egress_id"
-    TOKEN_DNS_PRIMARY="$dns_primary"; TOKEN_DNS_SECONDARY="$dns_secondary"
+    TOKEN_EXIT_PUBLIC_IP="$exit_public_ip"
+    TOKEN_PORT_MODE='custom'
+    TOKEN_IKE_PORT="$DEFAULT_IKE_PORT"
+    TOKEN_NATT_PORT="$natt_port"
+    TOKEN_PSK="$psk"
+    TOKEN_TUNNEL_CIDR="$tunnel_cidr"
+    TOKEN_XFRM_ID="$xfrm_id"
+    TOKEN_XFRM_IF="$ingress_xfrm_if"
+    TOKEN_EGRESS_XFRM_IF="$egress_xfrm_if"
+    TOKEN_XFRM_MTU="$xfrm_mtu"
+    TOKEN_INGRESS_XFRM_CIDR="$ingress_xfrm_cidr"
+    TOKEN_EGRESS_XFRM_CIDR="$egress_xfrm_cidr"
+    TOKEN_INGRESS_XFRM_IP="$ingress_xfrm_ip"
+    TOKEN_EGRESS_XFRM_IP="$egress_xfrm_ip"
+    TOKEN_INGRESS_ID="$ingress_id"
+    TOKEN_EGRESS_ID="$egress_id"
+    TOKEN_DNS_PRIMARY="$dns_primary"
+    TOKEN_DNS_SECONDARY="$dns_secondary"
 }
 
 # New dispatchers override the single-peer egress functions while retaining the
@@ -4434,7 +4597,10 @@ configured_ingress() {
         set +u
         # shellcheck disable=SC1090
         source "$CONFIG_FILE"
-        [[ "${ROLE:-}" == ingress ]]
+        [[ "${ROLE:-}" == ingress ]] &&
+        [[ "${CONFIG_SCHEMA:-0}" == 6 ]] &&
+        [[ "${PORT_MODE:-}" == custom ]] &&
+        [[ "${XFRM_IF:-}" =~ ^dfr[0-9]{4}$ ]]
     )
 }
 
@@ -4722,7 +4888,7 @@ collect_client_runtime() {
     unit=$(profile_service "$name")
     SNAP_SERVICE=$(systemctl is-active "$unit" 2>/dev/null || true)
     SNAP_ENABLED=$(systemctl is-enabled "$unit" 2>/dev/null || true)
-    SNAP_TRANSPORT=$(if [[ "$PORT_MODE" == standard ]]; then printf 'UDP 500/4500'; else printf 'UDP %s' "$NATT_PORT"; fi)
+    SNAP_TRANSPORT=$(printf 'UDP %s' "$NATT_PORT")
     SNAP_XFRM="$XFRM_IF"
     SNAP_XFRM_ID="$XFRM_ID"
     SNAP_TUNNEL="$TUNNEL_CIDR"
@@ -5190,7 +5356,7 @@ ${C_BOLD}${C_MAGENTA}EGRESS CONNECTION DIAGNOSTICS${C_RESET}
   ${C_CYAN}1)${C_RESET} IKE / CHILD and traffic summary
   ${C_GREEN}2)${C_RESET} Tunnel peer ping and XFRM path
   ${C_GREEN}3)${C_RESET} DNS and per-connection NAT readiness
-  ${C_CYAN}4)${C_RESET} Service, listener and canonical configuration links
+  ${C_CYAN}4)${C_RESET} Service, listener and canonical configuration files
   ${C_CYAN}5)${C_RESET} Forwarding and NAT rules
   ${C_YELLOW}6)${C_RESET} Recent warnings and errors
   ${C_RED}7)${C_RESET} Advanced raw strongSwan output
@@ -5475,7 +5641,7 @@ Usage: dragon-fruit-relay connection <action> [options]
        dragon-fruit-relay client <action> [options]   # backward-compatible alias
 
 Actions:
-  add [--name NAME] [--port auto|standard|PORT] [--tunnel CIDR]
+  add [--name NAME] [--port auto|PORT] [--tunnel CIDR]
   list [--json]
   status NAME [--json]
   diagnostics NAME [ike|network|dns-nat|service|firewall|logs|raw|live-dns|live-traffic]
@@ -5556,7 +5722,7 @@ enable_managed_unit_link() {
 }
 
 delete_link_bounded() {
-    local ifname="${1:-}" pid elapsed=0
+    local ifname="${1:-}" pid elapsed=0 status=0
     [[ -n "$ifname" ]] || return 0
     ip link show dev "$ifname" >/dev/null 2>&1 || return 0
     ip link set "$ifname" down >/dev/null 2>&1 || true
@@ -5565,7 +5731,15 @@ delete_link_bounded() {
     pid=$!
     while ((elapsed < 5)); do
         if ! kill -0 "$pid" 2>/dev/null; then
-            wait "$pid" 2>/dev/null || true
+            if wait "$pid" 2>/dev/null; then
+                status=0
+            else
+                status=$?
+            fi
+            if ((status != 0)) || ip link show dev "$ifname" >/dev/null 2>&1; then
+                warn "Interface ${ifname} could not be deleted."
+                return 1
+            fi
             return 0
         fi
         sleep 1
@@ -5575,9 +5749,337 @@ delete_link_bounded() {
     kill -TERM "$pid" 2>/dev/null || true
     sleep 1
     kill -KILL "$pid" 2>/dev/null || true
-    disown "$pid" 2>/dev/null || true
+    wait "$pid" 2>/dev/null || true
     warn "The kernel did not complete deletion of interface $ifname within 5 seconds. A reboot may be required to clear the stale netlink operation."
     return 1
+}
+
+cleanup_vici_socket() {
+    local socket="${1:-}"
+    [[ -n "$socket" ]] || return 0
+    rm -f -- "$socket" "${socket%.vici}.dck" "${socket%.vici}.ctl" "${socket%.vici}.wlst"
+}
+
+xfrm_link_is_xfrm() {
+    local interface="$1" details
+    details=$(ip -d link show dev "$interface" 2>/dev/null || true)
+    grep -qw 'xfrm' <<<"$details"
+}
+
+list_dfr_named_links() {
+    ip -o link show 2>/dev/null | awk -F': ' '
+        $2 ~ /^dfr[0-9]{4}(@|$)/ {
+            sub(/@.*/, "", $2)
+            print $2
+        }
+    ' | LC_ALL=C sort -u
+}
+
+dfr_interface_tunnel_address_ok() {
+    local interface="$1" addresses
+    addresses=$(ip -4 -o address show dev "$interface" 2>/dev/null || true)
+
+    # A link created immediately before a failed address assignment may have no
+    # address at all. Treat that as an incomplete managed link. If addresses do
+    # exist, require every IPv4 address to be a /30 inside the DFR tunnel pool.
+    [[ -z "$addresses" ]] && return 0
+    awk '
+        $4 !~ /^10\.10\.[0-9]+\.[0-9]+\/30$/ { bad=1 }
+        $4 ~  /^10\.10\.[0-9]+\.[0-9]+\/30$/ { good=1 }
+        END { exit(good && !bad ? 0 : 1) }
+    ' <<<"$addresses"
+}
+
+dfr_interface_signature() {
+    local interface="$1" details index expected_id expected_hex
+    [[ "$interface" =~ ^dfr[0-9]{4}$ ]] || return 1
+    xfrm_link_is_xfrm "$interface" || return 1
+    index=$((10#${interface#dfr}))
+    ((index >= 1 && index <= 9999)) || return 1
+    expected_id=$((PROFILE_XFRM_ID_BASE + index))
+    expected_hex=$(printf '0x%x' "$expected_id")
+    details=$(ip -d link show dev "$interface" 2>/dev/null || true)
+    grep -Eq "if_id (${expected_id}|${expected_hex})([[:space:]]|$)" <<<"$details" || return 1
+    dfr_interface_tunnel_address_ok "$interface"
+}
+
+list_dragonfruit_xfrm_links() {
+    local interface
+    while IFS= read -r interface; do
+        [[ -n "$interface" ]] || continue
+        dfr_interface_signature "$interface" && printf '%s\n' "$interface"
+    done < <(list_dfr_named_links)
+}
+
+list_suspicious_dfr_links() {
+    local interface
+    while IFS= read -r interface; do
+        [[ -n "$interface" ]] || continue
+        dfr_interface_signature "$interface" || printf '%s\n' "$interface"
+    done < <(list_dfr_named_links)
+}
+
+dfr_interface_referenced() {
+    local wanted="$1" name file
+    if [[ -r "$CONFIG_FILE" ]]; then
+        if (
+            set +u
+            # shellcheck disable=SC1090
+            source "$CONFIG_FILE"
+            [[ "${XFRM_IF:-}" == "$wanted" ]]
+        ); then
+            return 0
+        fi
+    fi
+    while IFS= read -r name; do
+        [[ -n "$name" ]] || continue
+        file=$(profile_config_file "$name")
+        if (
+            set +u
+            # shellcheck disable=SC1090
+            source "$file"
+            [[ "${XFRM_IF:-}" == "$wanted" ]]
+        ); then
+            return 0
+        fi
+    done < <(profile_names)
+    return 1
+}
+
+dragonfruit_xfrm_links_exist() {
+    list_dragonfruit_xfrm_links | grep -q .
+}
+
+remove_abandoned_dragonfruit_xfrm_links() {
+    local force="${1:-no}" interface
+    while IFS= read -r interface; do
+        [[ "$interface" =~ ^dfr[0-9]{4}$ ]] || continue
+        xfrm_link_is_xfrm "$interface" || continue
+        if [[ "$force" != yes ]] && dfr_interface_referenced "$interface"; then
+            continue
+        fi
+        if delete_link_bounded "$interface"; then
+            info "Removed abandoned XFRM interface ${interface}."
+        else
+            warn "Could not remove abandoned XFRM interface ${interface}."
+        fi
+    done < <(list_dragonfruit_xfrm_links)
+}
+
+legacy_xfrm_referenced_by_dragonfruit() {
+    local wanted="$1" file
+    for file in "$CONFIG_FILE" "$STATE_DIR/last-dragonfruit-relay.conf"; do
+        [[ -r "$file" ]] || continue
+        if (
+            set +u
+            # shellcheck disable=SC1090
+            source "$file"
+            [[ "${XFRM_IF:-}" == "$wanted" ]]
+        ); then
+            return 0
+        fi
+    done
+    return 1
+}
+
+legacy_xfrm_owned_by_dragonfruit() {
+    local interface="$1"
+    [[ "$interface" =~ ^xfrm[0-9]+$ ]] || return 1
+    xfrm_link_is_xfrm "$interface" || return 1
+    legacy_xfrm_referenced_by_dragonfruit "$interface" && return 0
+    [[ "$interface" == "$LEGACY_XFRM_IF" ]] && dragonfruit_default_xfrm_signature "$interface"
+}
+
+list_legacy_dragonfruit_xfrm_links() {
+    local interface
+    while IFS= read -r interface; do
+        [[ "$interface" =~ ^xfrm[0-9]+$ ]] || continue
+        legacy_xfrm_owned_by_dragonfruit "$interface" && printf '%s\n' "$interface"
+    done < <(ip -o link show 2>/dev/null | awk -F': ' '
+        $2 ~ /^xfrm[0-9]+(@|$)/ {
+            sub(/@.*/, "", $2)
+            print $2
+        }
+    ')
+}
+
+legacy_dragonfruit_xfrm_links_exist() {
+    list_legacy_dragonfruit_xfrm_links | grep -q .
+}
+
+remove_legacy_dragonfruit_xfrm_links() {
+    local interface
+    while IFS= read -r interface; do
+        [[ -n "$interface" ]] || continue
+        warn "Removing unsupported legacy Dragon Fruit Relay interface ${interface}. Recreate the connection with dfrNNNN and token v6."
+        delete_link_bounded "$interface" || true
+    done < <(list_legacy_dragonfruit_xfrm_links)
+}
+
+remove_legacy_token_xfrm_interface() {
+    local interface="${1:-}" expected_id="${2:-}" details expected_hex
+    [[ "$interface" =~ ^xfrm[0-9]+$ ]] || return 0
+    ip link show dev "$interface" >/dev/null 2>&1 || return 0
+
+    if legacy_xfrm_owned_by_dragonfruit "$interface"; then
+        warn "Token v5 referenced ${interface}; removing that legacy managed interface before creating the dfr connection."
+        delete_link_bounded "$interface" || true
+        return 0
+    fi
+
+    # The token itself is trusted Dragon Fruit Relay metadata.  For a residual
+    # interface not covered by local state, require both XFRM type and the same
+    # interface ID before deleting it.
+    if validate_uint_range "$expected_id" 1 4294967295 && xfrm_link_is_xfrm "$interface"; then
+        details=$(ip -d link show dev "$interface" 2>/dev/null || true)
+        expected_hex=$(printf '0x%x' "$expected_id")
+        if grep -Eq "if_id (${expected_id}|${expected_hex})([[:space:]]|$)" <<<"$details"; then
+            warn "Token v5 matched residual ${interface} (ID ${expected_id}); removing it before creating the dfr connection."
+            delete_link_bounded "$interface" || true
+            return 0
+        fi
+    fi
+
+    warn "Token v5 referenced ${interface}, but its live type/ID does not match the token. It was left untouched."
+}
+
+quarantine_legacy_single_installation() {
+    legacy_single_configured || return 0
+    load_config
+    warn 'This installation uses the removed xfrm/default-port design. Its runtime is being stopped before recreation.'
+    timeout 15s systemctl disable --now dragonfruit-relay-healthcheck.timer >/dev/null 2>&1 || true
+    timeout 15s systemctl stop dragonfruit-relay-healthcheck.service dragonfruit-relay-dns.service \
+        dragonfruit-relay-routing.service strongswan.service dragonfruit-relay-xfrm.service >/dev/null 2>&1 || true
+    swanctl --terminate --ike dragonfruit_relay >/dev/null 2>&1 || true
+    if [[ "${ROLE:-}" == ingress ]]; then
+        delete_rule_pref_all "${RULE_DNS_PRIMARY:-}"
+        delete_rule_pref_all "${RULE_DNS_SECONDARY:-}"
+        delete_rule_pref_all "${RULE_TUNNEL_SOURCE:-}"
+        [[ "${ROUTE_TABLE:-}" =~ ^[0-9]+$ ]] && ip -4 route flush table "$ROUTE_TABLE" 2>/dev/null || true
+    elif [[ "${ROLE:-}" == egress ]]; then
+        remove_egress_network_rules || true
+    fi
+    if [[ "${XFRM_IF:-}" =~ ^dfr[0-9]{4}$ ]]; then
+        delete_link_bounded "$XFRM_IF" || true
+    elif [[ -n "${XFRM_IF:-}" ]] && legacy_xfrm_owned_by_dragonfruit "$XFRM_IF"; then
+        delete_link_bounded "$XFRM_IF" || true
+    fi
+    remove_legacy_dragonfruit_xfrm_links
+}
+
+profile_current_design_ok() {
+    local name="$1" file index expected_id
+    file=$(profile_config_file "$name")
+    [[ -r "$file" ]] || return 1
+    (
+        set +u
+        # shellcheck disable=SC1090
+        source "$file"
+        [[ "${PORT_MODE:-}" == custom ]] || exit 1
+        [[ "${IKE_PORT:-}" == "$DEFAULT_IKE_PORT" || "${IKE_PORT:-}" == "$LEGACY_IKE_PORT" ]] || exit 1
+        [[ "${NATT_PORT:-}" =~ ^[0-9]+$ ]] || exit 1
+        ((NATT_PORT >= PROFILE_PORT_MIN && NATT_PORT <= PROFILE_PORT_MAX)) || exit 1
+        [[ "${XFRM_IF:-}" =~ ^dfr[0-9]{4}$ ]] || exit 1
+        index=$((10#${XFRM_IF#dfr}))
+        ((index >= 1 && index <= 9999)) || exit 1
+        expected_id=$((PROFILE_XFRM_ID_BASE + index))
+        [[ "${XFRM_ID:-}" == "$expected_id" ]]
+    )
+}
+
+hub_upgrade_needed() {
+    local name host_schema host_version profile_schema profile_version profile_socket profile_ike canonical path
+    load_host_config
+    host_schema="${HUB_SCHEMA:-0}"
+    host_version="${MANAGED_BY_VERSION:-0}"
+    [[ "$host_schema" == "$HUB_SCHEMA_CURRENT" && "$host_version" == "$APP_VERSION" ]] || return 0
+    while IFS= read -r name; do
+        [[ -n "$name" ]] || continue
+        profile_current_design_ok "$name" || return 0
+        profile_schema=$(awk -F= '$1=="PROFILE_SCHEMA" {gsub(/[^0-9]/,"",$2); print $2; exit}' "$(profile_config_file "$name")")
+        profile_version=$(awk -F= '$1=="MANAGED_BY_VERSION" {gsub(/[^0-9.]/,"",$2); print $2; exit}' "$(profile_config_file "$name")")
+        [[ "$profile_schema" == "$PROFILE_SCHEMA_CURRENT" && "$profile_version" == "$APP_VERSION" ]] || return 0
+        profile_socket=$(
+            set +u
+            # shellcheck disable=SC1090
+            source "$(profile_config_file "$name")"
+            printf '%s' "${VICI_SOCKET:-}"
+        )
+        [[ "$profile_socket" == "$(profile_vici_socket "$name")" ]] || return 0
+        profile_ike=$(
+            set +u
+            # shellcheck disable=SC1090
+            source "$(profile_config_file "$name")"
+            printf '%s' "${IKE_PORT:-}"
+        )
+        [[ "$profile_ike" == "$DEFAULT_IKE_PORT" ]] || return 0
+        canonical=$(profile_swanctl_canonical "$name")
+        [[ -f "$canonical" && ! -L "$canonical" ]] || return 0
+        canonical=$(profile_strongswan_canonical "$name")
+        [[ -f "$canonical" && ! -L "$canonical" ]] || return 0
+        for path in "$(profile_swanctl_dir "$name")"/{x509,x509ca,x509ocsp,x509aa,x509ac,x509crl,pubkey,private,rsa,ecdsa,pkcs8,pkcs12}; do
+            [[ -d "$path" && ! -L "$path" ]] || return 0
+        done
+    done < <(profile_names)
+    return 1
+}
+
+upgrade_hub_installation() {
+    hub_configured || return 0
+    hub_upgrade_needed || return 0
+    load_host_config
+    warn "Upgrading the egress hub runtime layout to Dragon Fruit Relay ${APP_VERSION}."
+    # Install the new stop/start helpers before touching profile.conf so an
+    # active v2.0.1 daemon can clean both its old and new socket namespaces.
+    write_hub_helpers
+    local name unit was_active was_enabled old_socket failures=0
+    while IFS= read -r name; do
+        [[ -n "$name" ]] || continue
+        if ! profile_current_design_ok "$name"; then
+            warn "Removing incompatible profile '${name}' because it uses standard ports or legacy XFRM naming. Create a new custom-port connection."
+            remove_hub_client "$name" yes || failures=$((failures + 1))
+            continue
+        fi
+        unit=$(profile_service "$name")
+        was_active=no; was_enabled=no
+        systemctl is-active --quiet "$unit" 2>/dev/null && was_active=yes
+        systemctl is-enabled --quiet "$unit" 2>/dev/null && was_enabled=yes
+        load_client_profile "$name"
+        old_socket="${VICI_SOCKET:-}"
+
+        if [[ "$was_active" == yes ]]; then
+            timeout 25s systemctl stop "$unit" >/dev/null 2>&1 || true
+        fi
+        cleanup_profile_runtime_sockets "$name" "$old_socket"
+
+        write_client_profile "$name"
+        load_client_profile "$name"
+        write_client_strongswan "$name"
+        write_client_swanctl "$name"
+        generate_client_token "$name" >/dev/null
+
+        if [[ "$was_enabled" == yes ]]; then
+            systemctl enable "$unit" >/dev/null 2>&1 || true
+        else
+            systemctl disable "$unit" >/dev/null 2>&1 || true
+        fi
+        if [[ "$was_active" == yes ]]; then
+            if ! systemctl start "$unit" >>"$LOG_FILE" 2>&1 || ! profile_listener_ok "$name"; then
+                warn "Profile '${name}' was upgraded but did not restart with its custom UDP listener."
+                failures=$((failures + 1))
+            else
+                apply_client_network_rules "$name"
+            fi
+        fi
+    done < <(profile_names)
+    load_host_config
+    write_hub_host_config
+    write_hub_readme
+    remove_abandoned_dragonfruit_xfrm_links
+    rmdir /run/dragonfruit-relay 2>/dev/null || true
+    systemctl daemon-reload >/dev/null 2>&1 || true
+    ((failures == 0)) && success 'Egress hub profiles, AppArmor-safe sockets, and canonical runtime files were upgraded to token v6/custom-only operation.' || \
+        warn "Hub upgrade completed with ${failures} profile warning(s)."
 }
 
 xfrm_runtime_ready() {
@@ -5750,33 +6252,37 @@ write_strongswan_common_files() {
     install -d -m 0700 "$INGRESS_CONFIG_DIR"
     install -d -m 0755 /etc/strongswan.d "$STRONGSWAN_OVERRIDE_DIR"
 
-    local custom_port_lines=''
-    if [[ "$ROLE" == egress && "$PORT_MODE" == custom ]]; then
-        custom_port_lines=$(printf '    port_nat_t = %s\n' "$NATT_PORT")
-    fi
+    [[ "${ROLE:-}" == ingress ]] || die 'The shared strongSwan service is reserved for the ingress role.'
+    [[ "$PORT_MODE" == custom ]] || die 'Standard UDP 500/4500 transport was removed. Recreate this connection.'
+    [[ "$XFRM_IF" =~ ^dfr[0-9]{4}$ ]] || die 'Legacy xfrm* interfaces were removed. Recreate this connection.'
 
-    cat >"$INGRESS_STRONGSWAN_SOURCE" <<EOF_STRONGSWAN_204
+    cat >"$INGRESS_STRONGSWAN_SOURCE" <<'EOF_STRONGSWAN_202'
 # Managed by Dragon Fruit Relay.
 charon {
+    # Ephemeral local IKE/NAT-T sockets prevent binding UDP 500 or UDP 4500.
+    # remote_port in swanctl.conf selects the egress custom NAT-T socket.
+    port = 0
+    port_nat_t = 0
     install_routes = no
-${custom_port_lines}
     plugins {
-        kernel-libipsec { load = no }
+        kernel-libipsec {
+            load = no
+        }
         kernel-netlink {
             load = yes
             install_routes_xfrmi = no
         }
     }
 }
-EOF_STRONGSWAN_204
+EOF_STRONGSWAN_202
     chmod 0644 "$INGRESS_STRONGSWAN_SOURCE"
 
-    cat >"$INGRESS_OVERRIDE_SOURCE" <<'EOF_OVERRIDE_204'
+    cat >"$INGRESS_OVERRIDE_SOURCE" <<'EOF_OVERRIDE_202'
 # Managed by Dragon Fruit Relay.
 [Unit]
 Requires=dragonfruit-relay-xfrm.service
 After=dragonfruit-relay-xfrm.service
-EOF_OVERRIDE_204
+EOF_OVERRIDE_202
     chmod 0644 "$INGRESS_OVERRIDE_SOURCE"
 
     install_ingress_canonical_link "$INGRESS_STRONGSWAN_SOURCE" "$STRONGSWAN_ROUTE_FILE"
@@ -5822,7 +6328,7 @@ prepare_ingress_swanctl_layout() {
             case "$(basename "$path")" in
                 swanctl.conf)
                     if [[ -L "$path" ]]; then
-                        target=$(readlink -f -- "$path" 2>/dev/null || true)
+                        target=$(readlink -f -- "$path" 2>/dev/null || readlink -- "$path" 2>/dev/null || true)
                         [[ "$target" == "$CONFIG_DIR"/* || "$target" == "$LEGACY_LIB_DIR"/* ]] || unknown="$path"
                     elif [[ -f "$path" ]] && grep -q '^# Managed by Dragon Fruit Relay\.' "$path" 2>/dev/null; then
                         :
@@ -5856,7 +6362,7 @@ prepare_ingress_swanctl_layout() {
     for credential_dir in x509 x509ca x509ocsp x509aa x509ac x509crl pubkey private rsa ecdsa pkcs8 pkcs12; do
         path="$INGRESS_SWANCTL_DIR/$credential_dir"
         if [[ -L "$path" ]]; then
-            target=$(readlink -f -- "$path" 2>/dev/null || true)
+            target=$(readlink -f -- "$path" 2>/dev/null || readlink -- "$path" 2>/dev/null || true)
             case "$target" in
                 "$CONFIG_DIR"/*|"$LEGACY_LIB_DIR"/*) rm -f -- "$path" ;;
                 *) die "Refusing to replace unmanaged swanctl credential link: ${path}" ;;
@@ -5880,13 +6386,9 @@ write_swanctl_ingress() {
     ensure_managed_layout
     install -d -m 0700 "$INGRESS_CONFIG_DIR"
     prepare_ingress_swanctl_layout
+    [[ "$PORT_MODE" == custom ]] || die 'Standard UDP 500/4500 transport was removed. Recreate this connection.'
 
-    local remote_port_line=''
-    if [[ "$PORT_MODE" == custom ]]; then
-        remote_port_line=$(printf '        local_port = %s\n        remote_port = %s' "$DEFAULT_NATT_PORT" "$NATT_PORT")
-    fi
-
-    cat >"$INGRESS_SWANCTL_SOURCE" <<EOF_SWANCTL_204
+    cat >"$INGRESS_SWANCTL_SOURCE" <<EOF_SWANCTL_202
 # Managed by Dragon Fruit Relay.
 # Role: ingress / initiator
 connections {
@@ -5894,7 +6396,7 @@ connections {
         version = 2
         local_addrs = %any
         remote_addrs = ${PEER_PUBLIC_IP}
-${remote_port_line}
+        remote_port = ${NATT_PORT}
         encap = yes
         mobike = no
         fragmentation = yes
@@ -5929,19 +6431,15 @@ secrets {
         secret = "${PSK}"
     }
 }
-EOF_SWANCTL_204
+EOF_SWANCTL_202
     chmod 0600 "$INGRESS_SWANCTL_SOURCE"
     install_ingress_canonical_copy "$INGRESS_SWANCTL_SOURCE" "$INGRESS_SWANCTL_CANONICAL"
 
-    # 2.0.4 briefly used /etc/swanctl/swanctl.conf as a managed symlink.
-    # Remove only that Dragon Fruit Relay-owned integration; never touch a
-    # package- or administrator-owned top-level swanctl.conf.
     if dragonfruit_owned_symlink "$SWANCTL_FILE" ||
        { [[ -f "$SWANCTL_FILE" ]] && grep -q '^# Managed by Dragon Fruit Relay\.' "$SWANCTL_FILE" 2>/dev/null; }; then
         rm -f -- "$SWANCTL_FILE"
         if manifest_contains "$SWANCTL_FILE"; then
-            local saved="${BACKUP_DIR}/files${SWANCTL_FILE}"
-            local state
+            local saved="${BACKUP_DIR}/files${SWANCTL_FILE}" state
             state=$(awk -F '\t' -v target="$SWANCTL_FILE" '$2 == target {print $1; exit}' "$MANIFEST_FILE" 2>/dev/null || true)
             if [[ "$state" == present && -e "$saved" ]]; then
                 install -d -m 0755 "$(dirname "$SWANCTL_FILE")"
@@ -6253,20 +6751,20 @@ run_recovery() {
 
 generate_current_ingress_token() {
     load_config
-    [[ "$ROLE" == ingress ]] || return 1
+    [[ "$ROLE" == ingress && "$PORT_MODE" == custom && "$XFRM_IF" =~ ^dfr[0-9]{4}$ ]] || return 1
     local payload
     payload=$(cat <<EOF_CURRENT_TOKEN
 TOKEN_VERSION=${PROFILE_TOKEN_VERSION}
 PROFILE_NAME=${PROFILE_NAME:-paired-egress}
 EXIT_PUBLIC_IP=${PEER_PUBLIC_IP}
-PORT_MODE=${PORT_MODE}
-IKE_PORT=${IKE_PORT}
+PORT_MODE=custom
+IKE_PORT=0
 NATT_PORT=${NATT_PORT}
 PSK=${PSK}
 TUNNEL_CIDR=${TUNNEL_CIDR}
 XFRM_ID=${XFRM_ID}
 INGRESS_XFRM_IF=${XFRM_IF}
-EGRESS_XFRM_IF=xfrm-egress
+EGRESS_XFRM_IF=${XFRM_IF}
 XFRM_MTU=${XFRM_MTU}
 INGRESS_XFRM_CIDR=${INGRESS_XFRM_CIDR}
 EGRESS_XFRM_CIDR=${EGRESS_XFRM_CIDR}
@@ -6468,11 +6966,7 @@ diagnostics_ports() {
     section_title 'Transport and path'
     printf '  %-24s %s\n' 'Configured transport' "$(transport_description)" >"$TTY_OUT"
     if [[ "$ROLE" == ingress ]]; then
-        if [[ "$PORT_MODE" == custom ]]; then
-            printf '  %-24s %s:%s\n' 'Egress endpoint' "$PEER_PUBLIC_IP" "$NATT_PORT" >"$TTY_OUT"
-        else
-            printf '  %-24s %s:%s\n' 'Egress endpoint' "$PEER_PUBLIC_IP" "$IKE_PORT" >"$TTY_OUT"
-        fi
+        printf '  %-24s %s:%s\n' 'Egress endpoint' "$PEER_PUBLIC_IP" "$NATT_PORT" >"$TTY_OUT"
         print_route_check 'Endpoint path' "$PEER_PUBLIC_IP" '' "$WAN_IF"
         local direct_ip='' tunnel_ip='' sas
         direct_ip=$(detect_public_ipv4 "$WAN_IF" || true)
@@ -6576,7 +7070,7 @@ ingress_connectivity_tests() {
 }
 
 write_managed_readme() {
-    cat >"$MANAGED_README" <<'EOF_README_204'
+    cat >"$MANAGED_README" <<'EOF_README_202'
 Dragon Fruit Relay managed directory
 ====================================
 
@@ -6587,7 +7081,7 @@ Ingress source files:
   ingress/strongswan.conf
   ingress/strongswan-systemd.conf
 
-Canonical strongSwan integration links:
+Canonical strongSwan integration paths:
   /etc/swanctl/dragonfruit-relay/ingress/swanctl.conf
   /etc/strongswan.d/99-dragonfruit-relay.conf
   /etc/systemd/system/strongswan.service.d/dragonfruit-relay.conf
@@ -6600,7 +7094,7 @@ Runtime helpers and units:
 The ingress menu can start, stop, repair, replace, or remove the current peer.
 Replacing a peer validates the new token before deleting the current connection
 and attempts to restore the previous connection if the replacement fails.
-EOF_README_204
+EOF_README_202
     chmod 0640 "$MANAGED_README"
 }
 
@@ -6624,7 +7118,7 @@ ingress_interactive_menu() {
     while configured_ingress; do
         clear_screen; banner
         ingress_main_dashboard
-        cat >"$TTY_OUT" <<EOF_INGRESS_MENU_204
+        cat >"$TTY_OUT" <<EOF_INGRESS_MENU_202
 
 ${C_BOLD}${C_MAGENTA}CONNECTION${C_RESET}
   ${C_CYAN}1)${C_RESET} Status overview
@@ -6640,7 +7134,7 @@ ${C_BOLD}${C_MAGENTA}REMOVE${C_RESET}
   ${C_YELLOW}9)${C_RESET} Remove current ingress connection and restore host state
   ${C_RED}10)${C_RESET} Completely uninstall Dragon Fruit Relay
   ${C_RED}0)${C_RESET} Exit
-EOF_INGRESS_MENU_204
+EOF_INGRESS_MENU_202
         choice=$(prompt 'Select an option: ')
         case "$choice" in
             1) diagnostics_overview || true; pause_screen ;;
@@ -6663,19 +7157,25 @@ unconfigured_menu() {
     local choice
     while [[ "$(current_node_role)" == unconfigured ]]; do
         clear_screen; banner; diagnostics_preflight
-        cat >"$TTY_OUT" <<EOF_UNCONFIGURED_204
+        cat >"$TTY_OUT" <<EOF_UNCONFIGURED_202
 
 ${C_BOLD}${C_MAGENTA}CHOOSE THIS SERVER'S ROLE${C_RESET}
   ${C_GREEN}1)${C_RESET} Configure as a multi-connection egress hub
   ${C_GREEN}2)${C_RESET} Configure as an ingress client
   ${C_CYAN}3)${C_RESET} Diagnostics / preflight
+
+${C_BOLD}${C_MAGENTA}REMOVE${C_RESET}
+  ${C_YELLOW}4)${C_RESET} Remove residual Dragon Fruit Relay state
+  ${C_RED}5)${C_RESET} Completely uninstall Dragon Fruit Relay
   ${C_RED}0)${C_RESET} Exit
-EOF_UNCONFIGURED_204
+EOF_UNCONFIGURED_202
         choice=$(prompt 'Select a role or action: ')
         case "$choice" in
             1) setup_egress_hub; return ;;
             2) setup_ingress; return ;;
             3) diagnostics_preflight; pause_screen ;;
+            4) remove_tunnel_configuration; pause_screen ;;
+            5) uninstall_routevpn; return ;;
             0) exit 0 ;;
             *) warn 'Invalid selection.'; sleep 1 ;;
         esac
@@ -6700,7 +7200,7 @@ interactive_main() {
 }
 
 usage() {
-    cat <<'EOF_USAGE_204'
+    cat <<'EOF_USAGE_202'
 Usage: dragon-fruit-relay [command]
 
 Role selection:
@@ -6726,12 +7226,12 @@ Egress hub commands:
   client ...                            Backward-compatible alias
   start|stop|repair --all               Operate all hub connections
 
-Migration and removal:
-  migrate [NAME]                        Migrate a 1.x installation
-  remove                                Remove the configured role
+Legacy cleanup and removal:
+  migrate                               Stop legacy runtime and open recreate/removal choices
+  remove                                Remove the configured role or residual state
   uninstall                             Complete removal, including the command
   version                               Show version
-EOF_USAGE_204
+EOF_USAGE_202
 }
 
 main() {
@@ -6740,10 +7240,22 @@ main() {
     local command="${1:-menu}" sub="${2:-}" role token=''
     role=$(current_node_role)
     case "$command" in
+        remove|uninstall|version|-h|--help|help) ;;
+        *)
+            if [[ "$role" == egress-hub ]]; then
+                upgrade_hub_installation
+                role=$(current_node_role)
+            fi
+            ;;
+    esac
+    case "$command" in
         menu) interactive_main ;;
         egress)
-            [[ "$role" == unconfigured || "$role" == legacy-or-invalid ]] || \
+            [[ "$role" == unconfigured ]] || {
+                [[ "$role" == legacy-or-invalid ]] && \
+                    die "A legacy or invalid installation is present. Run 'dragon-fruit-relay' and choose removal/recreation first."
                 die "This server is configured as ${role}. Remove that role before configuring an egress hub."
+            }
             case "$sub" in init|'') setup_egress_hub ;; *) die "Unknown egress action: ${sub}" ;; esac
             ;;
         ingress)
@@ -6766,8 +7278,11 @@ main() {
                     remove_tunnel_configuration
                     ;;
                 ''|--token)
-                    [[ "$role" == unconfigured || "$role" == legacy-or-invalid ]] || \
+                    [[ "$role" == unconfigured ]] || {
+                        [[ "$role" == legacy-or-invalid ]] && \
+                            die "A legacy or invalid installation is present. Run 'dragon-fruit-relay' and choose removal/recreation first."
                         die "This server is configured as ${role}. Use 'ingress replace' to change the peer."
+                    }
                     handle_legacy_routevpn
                     if [[ "$sub" == --token ]]; then
                         token="${3:-}"; [[ -n "$token" ]] || die 'The --token option requires a pairing token.'
@@ -6781,8 +7296,8 @@ main() {
             ;;
         connection|client) shift; client_cli "$@" ;;
         migrate)
-            legacy_single_configured || die 'No legacy Dragon Fruit Relay installation was detected.'
-            if [[ "$(legacy_config_role)" == egress ]]; then migrate_legacy_egress "${2:-}"; else migrate_legacy_ingress; fi
+            legacy_single_configured || die 'No supported legacy Dragon Fruit Relay installation was detected.'
+            legacy_migration_menu
             ;;
         diagnostics|diag)
             case "$role" in
@@ -6834,8 +7349,7 @@ main() {
         remove)
             case "$role" in
                 egress-hub) remove_egress_hub no no ;;
-                ingress-client) remove_tunnel_configuration ;;
-                *) die 'No configured Dragon Fruit Relay role was found.' ;;
+                ingress-client|legacy-or-invalid|unconfigured) remove_tunnel_configuration ;;
             esac
             ;;
         rebuild)

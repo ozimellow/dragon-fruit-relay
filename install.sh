@@ -6,7 +6,7 @@
 set -Eeuo pipefail
 umask 077
 
-readonly RELEASE_VERSION="2.0.1"
+readonly RELEASE_VERSION="2.0.2"
 readonly REPOSITORY="${DRAGON_FRUIT_REPOSITORY:-ozimellow/dragon-fruit-relay}"
 readonly REVISION="${DRAGON_FRUIT_REVISION:-main}"
 readonly SOURCE_URL="https://raw.githubusercontent.com/${REPOSITORY}/${REVISION}/dragon-fruit-relay.sh"
