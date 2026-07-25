@@ -13,6 +13,8 @@
 
 Dragon Fruit Relay manages route-based IKEv2/IPsec links between Debian hosts. It configures strongSwan, Linux XFRM interfaces, policy routing, DNS, systemd services, forwarding, NAT, diagnostics, recovery, and rollback from one interactive command.
 
+Each connection uses one dedicated custom UDP port. Dragon Fruit Relay does not use the standard IKE ports UDP 500 or UDP 4500.
+
 The intended deployment complements [3x-ui](https://github.com/MHSanaei/3x-ui): 3x-ui manages Xray inbounds, clients, subscriptions, limits, statistics, and application routing, while Dragon Fruit Relay provides the encrypted host-level path to an independently managed egress hub.
 
 ## Install
@@ -59,19 +61,22 @@ Dragon Fruit Relay does not install, modify, or replace 3x-ui. The projects rema
 
 1. Install and configure 3x-ui on each ingress host that will provide Xray inbounds and client management.
 2. Install Dragon Fruit Relay on the egress server and initialize an **egress hub**.
-3. Create an egress connection and copy its pairing token.
-4. Install Dragon Fruit Relay on the ingress server, select **ingress client**, and paste the token.
-5. In 3x-ui, direct the selected Xray outbound through the ingress XFRM source address shown by Dragon Fruit Relay.
+3. Create an egress connection and select one dedicated custom UDP port.
+4. Allow or forward the selected UDP port to the egress server when required by the network environment.
+5. Copy the generated pairing token.
+6. Install Dragon Fruit Relay on the ingress server, select **ingress client**, and paste the token.
+7. In 3x-ui, direct the selected Xray outbound through the ingress XFRM source address shown by Dragon Fruit Relay.
 
-Standard transport uses UDP 500 and UDP 4500. Additional isolated connections may use a custom direct UDP port.
+UDP 500 and UDP 4500 are not used or required.
 
 ## Capabilities
 
 - Multi-connection egress hub
 - Route-based IKEv2/IPsec with Linux XFRM
-- Independent strongSwan instance per egress connection
+- One dedicated custom UDP port per connection
+- Managed `dfrNNNN` XFRM interfaces
+- Independent strongSwan runtime per egress connection
 - Automatic IPv4 `/30` tunnel allocation
-- Standard or custom UDP transport
 - Policy routing and managed DNS on ingress
 - Per-connection forwarding and source NAT
 - Health monitoring and recovery
@@ -84,10 +89,13 @@ Standard transport uses UDP 500 and UDP 4500. Additional isolated connections ma
 - Root access
 - IPv4 connectivity
 - A reachable egress endpoint
-- UDP 500/4500 or one configured custom UDP port
+- One available custom UDP port for each connection
+- Firewall or NAT rules allowing the selected UDP port when required
 - 3x-ui only when using the recommended Xray management workflow
 
 Required Debian packages are installed automatically. 3x-ui is installed and maintained separately.
+
+UDP 500 and UDP 4500 do not need to be opened for Dragon Fruit Relay.
 
 ## Documentation
 
