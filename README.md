@@ -45,10 +45,14 @@ Dragon Fruit Relay does not install, modify, or replace 3x-ui. The projects rema
 ## Topology
 
 <p align="center">
-  <img
-    src="assets/topology.svg"
-    alt="3x-ui and Xray ingress hosts connected to a Dragon Fruit Relay egress hub using IKEv2 and IPsec"
-    width="920">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/topology-dark.svg">
+    <source media="(prefers-color-scheme: light)" srcset="assets/topology.svg">
+    <img
+      src="assets/topology.svg"
+      alt="3x-ui and Xray ingress hosts connected to a Dragon Fruit Relay egress hub using IKEv2 and IPsec"
+      width="920">
+  </picture>
 </p>
 
 ## Quick start
