@@ -19,6 +19,10 @@ As of release **v2.0.2**, every connection uses its own dedicated custom UDP por
 
 The project is designed to complement [3x-ui](https://github.com/MHSanaei/3x-ui). While 3x-ui manages Xray inbounds, users, subscriptions, limits, statistics, and application routing, Dragon Fruit Relay provides the encrypted host-level path between the ingress server and an independently managed egress hub.
 
+## Dedication
+
+The project name was chosen in solidarity with **Kian Pirfalak** and is dedicated to his memory.
+
 ## Install
 
 Open a root shell on Debian and run:
@@ -228,9 +232,6 @@ Before deploying it:
 
 Security issues should be reported according to [SECURITY.md](SECURITY.md).
 
-## Dedication
-
-The project name was chosen in solidarity with Kian Pirfalak and is dedicated to his memory.
 
 ## License
 
