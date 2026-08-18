@@ -23,7 +23,7 @@ cp -a "$ROOT/docs/." "$STAGE/docs/"
 cp -a "$ROOT/tests/." "$STAGE/tests/"
 
 chmod 0755 "$STAGE/install.sh" "$STAGE/main-engine/dragon-fruit-relay-egress.sh" "$STAGE/main-engine/dragon-fruit-relay-ingress.sh" "$STAGE/tests/run-all.sh"
-find "$STAGE/tests" -maxdepth 1 -type f -name '*.sh' -exec chmod 0755 {} +
+find "$STAGE/tests" -maxdepth 1 -type f \( -name '*.sh' -o -name '*.py' \) -exec chmod 0755 {} +
 
 (
   cd "$STAGE"
@@ -35,7 +35,7 @@ find "$STAGE/tests" -maxdepth 1 -type f -name '*.sh' -exec chmod 0755 {} +
 printf '%s\n' "==> Testing staged release tree"
 (
   cd "$STAGE"
-  ./tests/run-all.sh
+  bash ./tests/run-all.sh
 )
 
 SOURCE_DATE_EPOCH=${SOURCE_DATE_EPOCH:-$(git -C "$ROOT" log -1 --format=%ct 2>/dev/null || date +%s)}
@@ -58,7 +58,7 @@ unzip -q "$ZIP" -d "$VERIFY"
 printf '%s\n' "==> Testing exact extracted ZIP"
 (
   cd "$VERIFY/$PKG"
-  ./tests/run-all.sh
+  bash ./tests/run-all.sh
 )
 
 printf '%s\n' "==> Release artifacts"

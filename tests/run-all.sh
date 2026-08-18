@@ -1,7 +1,20 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
-run_test() { timeout 90s "$ROOT/tests/$1"; }
+run_test() {
+    local test_name="$1"
+    case "$test_name" in
+        *.py)
+            timeout 90s python3 "$ROOT/tests/$test_name"
+            ;;
+        *.sh)
+            timeout 90s bash "$ROOT/tests/$test_name"
+            ;;
+        *)
+            timeout 90s "$ROOT/tests/$test_name"
+            ;;
+    esac
+}
 # Run cryptographic release tests before the heavier registry/control integration
 # group so the release runner stays deterministic in constrained containers.
 run_test test-static.py
