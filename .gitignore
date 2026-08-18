@@ -5,4 +5,7 @@
 .DS_Store
 .idea/
 .vscode/
-release/
+dist/
+.release-work/
+__pycache__/
+*.pyc

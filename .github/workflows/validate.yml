@@ -2,32 +2,32 @@ name: Validate
 
 on:
   push:
+    branches: [main]
   pull_request:
+  workflow_dispatch:
 
 permissions:
   contents: read
 
 jobs:
-  repository:
+  release-equivalent:
     runs-on: ubuntu-latest
+    timeout-minutes: 25
     steps:
-      - uses: actions/checkout@v4
-      - name: Bash syntax
-        run: |
-          bash -n install.sh
-          bash -n dragon-fruit-relay.sh
-      - name: Version consistency
-        run: |
-          version=$(cat VERSION)
-          grep -Fq "readonly RELEASE_VERSION=\"${version}\"" install.sh
-          grep -Fq "readonly APP_VERSION=\"${version}\"" dragon-fruit-relay.sh
-          grep -Fq "MANAGED_BY_VERSION=${version}" dragon-fruit-relay.sh
-      - name: Parse SVG assets
-        run: |
-          python3 - <<'PY'
-          from pathlib import Path
-          import xml.etree.ElementTree as ET
-          for path in Path('assets').glob('*.svg'):
-              ET.parse(path)
-              print(path)
-          PY
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Build and test release package
+        run: ./scripts/build-release.sh
+
+      - name: Upload validated package
+        uses: actions/upload-artifact@v4
+        with:
+          name: dragon-fruit-relay-${{ github.sha }}
+          path: |
+            dist/dragon-fruit-relay-*.zip
+            dist/SHA256SUMS
+          if-no-files-found: error
+          retention-days: 7

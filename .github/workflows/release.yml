@@ -1,0 +1,107 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+  id-token: write
+  attestations: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout tagged source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Validate signed tag and version
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          tag="${GITHUB_REF_NAME}"
+          version=$(tr -d '[:space:]' < VERSION)
+          base="${tag#v}"
+          base="${base%%-*}"
+
+          [[ "$base" == "$version" ]] || {
+            echo "Tag $tag does not match VERSION=$version" >&2
+            exit 1
+          }
+
+          ref=$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${tag}")
+          type=$(jq -r '.object.type' <<<"$ref")
+          [[ "$type" == "tag" ]] || {
+            echo "Release tags must be signed annotated tags, not lightweight tags." >&2
+            exit 1
+          }
+
+          tag_sha=$(jq -r '.object.sha' <<<"$ref")
+          verified=$(gh api "repos/${GITHUB_REPOSITORY}/git/tags/${tag_sha}" --jq '.verification.verified')
+          [[ "$verified" == "true" ]] || {
+            echo "GitHub does not report $tag as a verified signed tag." >&2
+            exit 1
+          }
+
+          git fetch origin main
+          commit=$(git rev-list -n 1 "$tag")
+          git merge-base --is-ancestor "$commit" origin/main || {
+            echo "Release tag must point to a commit reachable from main." >&2
+            exit 1
+          }
+
+          if [[ "$tag" == *-* ]]; then
+            echo 'prerelease=true' >> "$GITHUB_ENV"
+          else
+            [[ "$tag" == "v${version}" ]] || {
+              echo "Stable release tag must be exactly v${version}." >&2
+              exit 1
+            }
+            echo 'prerelease=false' >> "$GITHUB_ENV"
+          fi
+          echo "version=$version" >> "$GITHUB_ENV"
+
+      - name: Build and test exact release archive
+        run: ./scripts/build-release.sh
+
+      - name: Attest release assets
+        uses: actions/attest@v4
+        with:
+          subject-path: |
+            dist/dragon-fruit-relay-*.zip
+            dist/SHA256SUMS
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: dragon-fruit-relay-${{ github.ref_name }}
+          path: |
+            dist/dragon-fruit-relay-*.zip
+            dist/SHA256SUMS
+          if-no-files-found: error
+
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          args=(
+            release create "$GITHUB_REF_NAME"
+            "dist/dragon-fruit-relay-${version}.zip"
+            "dist/SHA256SUMS"
+            --verify-tag
+            --generate-notes
+            --title "Dragon Fruit Relay ${GITHUB_REF_NAME}"
+          )
+          if [[ "$prerelease" == "true" ]]; then
+            args+=(--prerelease)
+          fi
+          gh "${args[@]}"

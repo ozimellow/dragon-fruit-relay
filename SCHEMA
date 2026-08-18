@@ -1,0 +1,14 @@
+Dragon Fruit Relay v2.1.0 schema contract
+
+product=dragon-fruit-relay
+product_lineage=standalone-dfr
+registry_schema=1
+hub_schema=1
+client_config_schema=1
+profile_schema=1
+enrollment_token=DFR1
+control_protocol=1
+subscription_protocol=1
+backup_format=1
+
+Fresh installations create this schema directly. DFR upgrades are supported only within the standalone Dragon Fruit Relay product lineage.

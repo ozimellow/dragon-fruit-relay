@@ -1,47 +1,25 @@
 # Troubleshooting
 
-## Start with the built-in diagnostics
+## Server shows zero connections
 
-Run:
+Zero connections is valid. Operations Center, Server Operations, backups, software management, configuration, and Connections should remain available. Use Diagnostics only if the Server itself reports a service or registry fault.
 
-```bash
-dragon-fruit-relay
-```
+## Client cannot resolve the Server endpoint
 
-Use the health summary before collecting raw output.
+If the endpoint is an IPv4 address, verify routing to that public address. If it is an FQDN, verify it resolves to one public IPv4 address and that the address matches the intended Server. The Client uses direct public DNS during endpoint bootstrap so its normal tunneled resolver path is not required first.
 
-## Useful system commands
+## Enrollment fails
 
-```bash
-systemctl status strongswan --no-pager -l
-swanctl --list-conns
-swanctl --list-sas
-ip -d link show type xfrm
-ip -4 rule show
-journalctl -u strongswan.service -n 100 --no-pager
-```
+Generate a fresh DFR1 token on the Server, verify the token was copied completely, confirm it has not expired, and verify the connection has not been replaced. DFR1 is the only accepted enrollment format in v2.1.0.
 
-On an egress hub, inspect the selected per-connection service and VICI socket rather than the disabled shared `strongswan.service`.
+## Tunnel is established but peer is unreachable
 
-## Resolver replaced after DHCP renewal
+Inspect the assigned `dfrNNNN` XFRM interface, XFRM ID, /30 addresses, strongSwan CHILD SA, and the Server connection runtime. `dragon-fruit-relay diagnostics` and `dragon-fruit-relay test` provide the normal read-only checks.
 
-On dhcpcd-based ingress hosts, Dragon Fruit Relay adds:
+## Quota/speed behavior is unexpected
 
-```text
-nohook resolv.conf
-```
+Inspect the connection subscription, current-period usage, lifetime usage, suspension state, per-connection upload/download limits, and Server global shaping policy. Refresh CONTROL status on the Client after changing Server policy.
 
-to `/etc/dhcpcd.conf`, reloads dhcpcd, and restores the original file during removal. Repair reapplies this integration.
+## Client update fails
 
-## Reporting a problem
-
-Include:
-
-- Dragon Fruit Relay version
-- Debian version
-- node role
-- relevant service state
-- redacted diagnostic output
-- exact reproduction steps
-
-Never publish a complete pairing token or PSK.
+Inspect release status, digest/signature verification, Client rollout policy, CONTROL reachability, update state, and rollback state from the Server connection dossier and Client update-status screen.
