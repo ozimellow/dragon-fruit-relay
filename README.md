@@ -7,37 +7,39 @@
 
 <p align="center">
   <img src="https://img.shields.io/badge/prerelease-v2.1.0--rc.1-F59E0B?style=flat-square" alt="v2.1.0-rc.1 prerelease">
-  <a href="../../actions/workflows/validate.yml"><img src="https://img.shields.io/github/actions/workflow/status/ozimellow/dragon-fruit-relay/validate.yml?branch=main&style=flat-square&label=validation" alt="Validation"></a>
+  <a href="../../actions/workflows/validate.yml"><img src="https://img.shields.io/github/actions/workflow/status/ozimellow/dragon-fruit-relay/validate.yml?branch=release%2Fv2.1.0-rc.1&style=flat-square&label=Debian%2012%20validation" alt="Debian 12 validation"></a>
   <a href="https://www.debian.org/"><img src="https://img.shields.io/badge/platform-Debian-A81D33?style=flat-square" alt="Debian"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-GPL--3.0--or--later-C6265A?style=flat-square" alt="GPL-3.0-or-later"></a>
 </p>
 
 # Dragon Fruit Relay
 
-Dragon Fruit Relay is a managed **IKEv2/IPsec + Linux XFRM relay for Debian**. It provides two roles through one installer: an **Egress Hub** that manages isolated connections and an **Ingress Client** that enrolls with a one-time DFR1 token.
+Dragon Fruit Relay is a managed **IKEv2/IPsec + Linux XFRM relay for Debian** with two roles: an **Egress Hub** that manages isolated Client connections and an **Ingress Client** that enrolls with a one-time DFR1 token.
 
-DFR manages the tunnel lifecycle around strongSwan, XFRM interfaces, policy routing, DNS, subscriptions, traffic accounting, speed policy, managed configuration, Client software releases, endpoint synchronization, backups, diagnostics and recovery.
+DFR manages strongSwan, XFRM interfaces, policy routing, DNS, subscriptions, traffic accounting, speed policy, managed configuration, endpoint synchronization, Client software releases, backups, diagnostics and recovery from one terminal interface.
 
 > [!WARNING]
-> **v2.1.0-rc.1 is a prerelease.** Use it for validation and staged deployment before the final v2.1.0 release.
+> **v2.1.0-rc.1 is a prerelease.** It is intended for validation and staged deployment before the final v2.1.0 release.
 
 ## Install
 
-Run the installer from a **root shell on Debian**.
+Run from a **root shell on Debian**.
 
-### Latest recommended release
+### Latest v2.1.0 prerelease
 
 ```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/ozimellow/dragon-fruit-relay/main/install.sh)
+bash <(curl -fsSL https://raw.githubusercontent.com/ozimellow/dragon-fruit-relay/refs/heads/release/v2.1.0-rc.1/install.sh)
 ```
 
 ### Specific release
 
 ```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/ozimellow/dragon-fruit-relay/main/install.sh) --version v2.1.0-rc.1
+bash <(curl -fsSL https://raw.githubusercontent.com/ozimellow/dragon-fruit-relay/refs/tags/v2.1.0-rc.1/install.sh)
 ```
 
-The bootstrap downloads the matching GitHub Release, verifies its published SHA-256 checksum, extracts it to a temporary directory and launches the real installer. On a fresh host DFR asks which role to configure:
+The bootstrap downloads the matching GitHub Release, verifies its published SHA-256 checksum, extracts it to a temporary directory and starts the real installer. No manual ZIP download or extraction is required.
+
+On a fresh host:
 
 ```text
 DRAGON FRUIT RELAY v2.1.0  |  INSTALLER
@@ -46,41 +48,40 @@ DRAGON FRUIT RELAY v2.1.0  |  INSTALLER
   [2]  Ingress Client (Client)
 ```
 
-Open the management interface later with:
+Open DFR later with:
 
 ```bash
 dragon-fruit-relay
 ```
 
-## What DFR provides
+## Highlights
 
-- One interactive installer for Egress Hub and Ingress Client roles.
-- Public IPv4 or FQDN Server endpoints, including managed endpoint migration.
-- One isolated PSK, custom UDP transport, XFRM interface and `/30` tunnel allocation per connection.
-- Per-connection subscriptions, quotas, expiration, suspension, upload/download accounting and speed limits.
+- One installer for Egress Hub and Ingress Client roles.
+- Public IPv4 or FQDN Server endpoints with authenticated endpoint synchronization and migration.
+- Isolated PSK, custom UDP transport, XFRM interface and `/30` tunnel allocation per connection.
+- Per-connection subscriptions, quotas, expiration, suspension, traffic accounting and upload/download speed limits.
 - Authenticated CONTROL/1 management over the encrypted tunnel.
-- Client presence, health, configuration convergence, endpoint state and software status.
+- Client presence, health, managed configuration, endpoint and software convergence states.
 - Server-managed Client releases with **STAGED / CANARY / STABLE / REVOKED** states and **AUTO / MANUAL / PINNED** policies.
-- Automatic, manual and rescue backups with verification and restore workflows.
-- Fleet summaries, detailed connection dossiers, diagnostics, logs, repair and recovery tools.
+- Fresh v2.1.0 Servers publish their exact bundled Client as **STABLE** and new connections default to **AUTO/LATEST**.
+- Automatic, manual and rescue backups with verification and restore.
+- Fleet summaries, detailed connection dossiers, diagnostics, logs, repair and recovery workflows.
 
-## Deployment model
+## Deployment
 
 ### Egress Hub
 
 The Egress Hub owns connection identity, tunnel allocation, subscriptions, accounting, policy, Client presence, managed configuration, endpoint synchronization, Client software releases, backups and recovery.
 
-A fresh v2.1.0 Egress Hub publishes its exact bundled Client as **STABLE**. New connections default to **AUTO/LATEST** while MANUAL and PINNED remain explicit operator choices.
-
 ### Ingress Client
 
 The Ingress Client consumes a one-time DFR1 enrollment token and builds the managed strongSwan/XFRM runtime. It applies routing and DNS policy, receives managed configuration and software policy through CONTROL/1, and reports health and convergence back to the Egress Hub.
 
-Applications can use the managed Client XFRM address as their egress path. Dragon Fruit Relay is independent of 3x-ui and can be used with 3x-ui or other applications without managing them.
+Dragon Fruit Relay is independent of 3x-ui. Applications may use the managed Client XFRM address as their egress path without DFR managing the application itself.
 
 ## Endpoint support
 
-The Server endpoint can be either a public IPv4 address or an FQDN. DFR supports all normal transitions:
+The Server endpoint may be a public IPv4 address or an FQDN. Supported transitions include:
 
 ```text
 IPv4 -> IPv4
@@ -89,23 +90,25 @@ FQDN -> IPv4
 FQDN -> FQDN
 ```
 
-Clients synchronize authenticated endpoint changes through the management plane. Previous endpoint state is retained until the operator explicitly finishes a completed migration.
+Previous endpoint state is retained until a completed migration is explicitly finished by the operator.
 
 ## Releases and trust
 
-Release tags are signed by the maintainer. GitHub Actions builds and tests the release package in **Debian 12**, verifies the extracted archive, publishes `SHA256SUMS`, and creates GitHub artifact attestations for release provenance.
+`main` remains the current stable line while this release candidate is developed and published from `release/v2.1.0-rc.1`.
 
-For checksum, signed-tag and provenance verification, see [Release Verification](docs/RELEASE-VERIFICATION.md). Maintainer steps are documented separately in [Release Process](docs/RELEASE-PROCESS.md).
+Release tags are signed by the maintainer. GitHub Actions validates and builds DFR inside **Debian 12**, retests the exact extracted ZIP, publishes `SHA256SUMS`, and creates GitHub artifact attestations.
+
+See [Release Verification](docs/RELEASE-VERIFICATION.md) for checksum, signed-tag and provenance verification. Maintainer release steps are in [Release Process](docs/RELEASE-PROCESS.md).
 
 ## Requirements
 
 - Debian with systemd
 - Root access
 - IPv4 connectivity
-- A reachable Server endpoint
+- Reachable Server endpoint
 - One available custom UDP port per managed connection
 
-Required runtime packages are installed by DFR when needed.
+Required runtime packages are installed automatically when needed.
 
 ## Documentation
 

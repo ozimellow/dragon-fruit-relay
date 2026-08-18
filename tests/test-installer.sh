@@ -92,3 +92,13 @@ CURL
     rm -rf "$B"
     printf '%s\n' 'installer bootstrap: exact release ZIP checksum verified before packaged installer launch OK'
 fi
+
+python3 - "$ROOT/README.md" <<'PY'
+from pathlib import Path
+import sys
+s = Path(sys.argv[1]).read_text()
+assert 'raw.githubusercontent.com/ozimellow/dragon-fruit-relay/refs/heads/release/v2.1.0-rc.1/install.sh' in s
+assert 'raw.githubusercontent.com/ozimellow/dragon-fruit-relay/refs/tags/v2.1.0-rc.1/install.sh' in s
+assert 'raw.githubusercontent.com/ozimellow/dragon-fruit-relay/main/install.sh' not in s
+PY
+printf '%s\n' 'README installer contract: prerelease branch/tag URLs do not depend on main OK'

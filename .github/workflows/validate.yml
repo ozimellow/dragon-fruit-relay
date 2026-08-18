@@ -2,7 +2,9 @@ name: Validate
 
 on:
   push:
-    branches: [main]
+    branches:
+      - main
+      - 'release/**'
   pull_request:
   workflow_dispatch:
 
@@ -22,8 +24,10 @@ jobs:
       - name: Prepare Debian 12
         run: |
           apt-get update
-          DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends bash ca-certificates coreutils findutils git grep jq python3 sed unzip zip
+          DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            bash ca-certificates coreutils findutils git grep jq python3 sed unzip zip
           rm -rf /var/lib/apt/lists/*
+
       - name: Checkout
         uses: actions/checkout@v4
         with:

@@ -23,19 +23,21 @@ jobs:
       - name: Prepare Debian 12
         run: |
           apt-get update
-          DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends bash ca-certificates coreutils findutils gh git grep jq python3 sed unzip zip
+          DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            bash ca-certificates coreutils findutils gh git grep jq python3 sed unzip zip
           rm -rf /var/lib/apt/lists/*
+
       - name: Checkout tagged source
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Validate signed tag and version
+      - name: Validate signed tag, version and source branch
         env:
           GH_TOKEN: ${{ github.token }}
-        shell: bash
         run: |
           set -Eeuo pipefail
+
           tag="${GITHUB_REF_NAME}"
           version=$(tr -d '[:space:]' < VERSION)
           base="${tag#v}"
@@ -60,22 +62,37 @@ jobs:
             exit 1
           }
 
-          git fetch origin main
           commit=$(git rev-list -n 1 "$tag")
-          git merge-base --is-ancestor "$commit" origin/main || {
-            echo "Release tag must point to a commit reachable from main." >&2
-            exit 1
-          }
 
           if [[ "$tag" == *-* ]]; then
+            release_branch="release/${tag}"
+            git fetch --no-tags origin "+refs/heads/${release_branch}:refs/remotes/origin/${release_branch}"
+            branch_commit=$(git rev-parse "refs/remotes/origin/${release_branch}")
+            [[ "$commit" == "$branch_commit" ]] || {
+              echo "Prerelease tag $tag must point to the exact tip of ${release_branch}." >&2
+              echo "tag commit:    $commit" >&2
+              echo "branch commit: $branch_commit" >&2
+              exit 1
+            }
             echo 'prerelease=true' >> "$GITHUB_ENV"
+            echo "source_branch=${release_branch}" >> "$GITHUB_ENV"
           else
             [[ "$tag" == "v${version}" ]] || {
               echo "Stable release tag must be exactly v${version}." >&2
               exit 1
             }
+            git fetch --no-tags origin "+refs/heads/main:refs/remotes/origin/main"
+            main_commit=$(git rev-parse refs/remotes/origin/main)
+            [[ "$commit" == "$main_commit" ]] || {
+              echo "Stable release tag $tag must point to the exact tip of main." >&2
+              echo "tag commit:  $commit" >&2
+              echo "main commit: $main_commit" >&2
+              exit 1
+            }
             echo 'prerelease=false' >> "$GITHUB_ENV"
+            echo 'source_branch=main' >> "$GITHUB_ENV"
           fi
+
           echo "version=$version" >> "$GITHUB_ENV"
 
       - name: Build and test exact release archive
@@ -100,7 +117,6 @@ jobs:
       - name: Publish GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
-        shell: bash
         run: |
           set -Eeuo pipefail
           args=(
