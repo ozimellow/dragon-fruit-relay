@@ -96,7 +96,7 @@ jobs:
           echo "version=$version" >> "$GITHUB_ENV"
 
       - name: Build and test exact release archive
-        run: ./scripts/build-release.sh
+        run: bash ./scripts/build-release.sh
 
       - name: Attest release assets
         uses: actions/attest@v4

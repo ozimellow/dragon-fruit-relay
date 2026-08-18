@@ -34,7 +34,7 @@ jobs:
           fetch-depth: 0
 
       - name: Build and test release package
-        run: ./scripts/build-release.sh
+        run: bash ./scripts/build-release.sh
 
       - name: Upload validated package
         uses: actions/upload-artifact@v4
