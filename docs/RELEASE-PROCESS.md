@@ -6,6 +6,7 @@ Dragon Fruit Relay releases are built from source by GitHub Actions. Do not uplo
 
 - `main` is validated continuously.
 - `VERSION` contains the product version, for example `2.1.0`.
+- `install.sh` contains `BOOTSTRAP_DEFAULT_TAG`, the release installed by the public no-argument curl command. Update it to the release tag being promoted.
 - Prerelease tags use signed annotated SemVer tags such as `v2.1.0-rc.1`.
 - The final stable tag uses `v2.1.0`.
 - The release workflow accepts `v*` tags, verifies that the tag's base version matches `VERSION`, requires the tag to be an annotated GitHub-verified signed tag, builds the release ZIP, tests the extracted ZIP, generates `SHA256SUMS`, creates GitHub artifact attestations, and publishes the GitHub Release.

@@ -37,3 +37,58 @@ state_probe = s.index('    if [[ -r "${CONFIG_ROOT}/host.conf"', main)
 assert clear_call < state_probe, 'installer clear must run before any install/update state UI'
 PY
 printf '%s\n' 'installer presentation: full-screen clear occurs before fresh/update state handling OK'
+
+python3 - "$ROOT/install.sh" <<'PY'
+from pathlib import Path
+import sys
+s = Path(sys.argv[1]).read_text()
+required = [
+    'BOOTSTRAP_DEFAULT_TAG="v2.1.0-rc.1"',
+    'bootstrap_release()',
+    '--version',
+    'releases/download/${tag}',
+    'SHA256SUMS',
+    'sha256sum -c',
+]
+for item in required:
+    assert item in s, f'public release bootstrap contract missing: {item}'
+assert s.rfind('bootstrap_release "$@"') > s.rfind('main "$@"'), 'bootstrap/local dispatch contract missing'
+PY
+printf '%s\n' 'installer bootstrap: release tag selection and SHA-256 verification contract OK'
+
+if [[ ${EUID:-$(id -u)} -eq 0 ]] && command -v zip >/dev/null 2>&1 && command -v unzip >/dev/null 2>&1; then
+    B=$(mktemp -d)
+    mkdir -p "$B/pkg/dragon-fruit-relay-2.1.0/main-engine" "$B/bin" "$B/run"
+    cat > "$B/pkg/dragon-fruit-relay-2.1.0/install.sh" <<'CHILD'
+#!/usr/bin/env bash
+printf 'BOOTSTRAP_CHILD_OK\n'
+CHILD
+    printf '#!/usr/bin/env bash\nexit 0\n' > "$B/pkg/dragon-fruit-relay-2.1.0/main-engine/dragon-fruit-relay-egress.sh"
+    printf '#!/usr/bin/env bash\nexit 0\n' > "$B/pkg/dragon-fruit-relay-2.1.0/main-engine/dragon-fruit-relay-ingress.sh"
+    chmod 0755 "$B/pkg/dragon-fruit-relay-2.1.0/install.sh" "$B/pkg/dragon-fruit-relay-2.1.0/main-engine/"*.sh
+    (cd "$B/pkg" && zip -qr "$B/dragon-fruit-relay-2.1.0.zip" dragon-fruit-relay-2.1.0)
+    (cd "$B" && sha256sum dragon-fruit-relay-2.1.0.zip > SHA256SUMS)
+    cat > "$B/bin/curl" <<CURL
+#!/usr/bin/env bash
+set -e
+out=''; last=''
+while ((\$#)); do
+    case "\$1" in
+        -o) out="\$2"; shift 2 ;;
+        *) last="\$1"; shift ;;
+    esac
+done
+case "\$last" in
+    */SHA256SUMS) cp "$B/SHA256SUMS" "\$out" ;;
+    */dragon-fruit-relay-2.1.0.zip) cp "$B/dragon-fruit-relay-2.1.0.zip" "\$out" ;;
+    *) printf 'unexpected bootstrap URL: %s\n' "\$last" >&2; exit 2 ;;
+esac
+CURL
+    chmod 0755 "$B/bin/curl"
+    cp "$ROOT/install.sh" "$B/run/install.sh"
+    bout=$(PATH="$B/bin:$PATH" bash "$B/run/install.sh" --version v2.1.0-rc.1)
+    grep -q 'dragon-fruit-relay-2.1.0.zip: OK' <<<"$bout"
+    grep -q 'BOOTSTRAP_CHILD_OK' <<<"$bout"
+    rm -rf "$B"
+    printf '%s\n' 'installer bootstrap: exact release ZIP checksum verified before packaged installer launch OK'
+fi

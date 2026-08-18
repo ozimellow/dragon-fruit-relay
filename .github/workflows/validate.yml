@@ -12,8 +12,18 @@ permissions:
 jobs:
   release-equivalent:
     runs-on: ubuntu-latest
+    container:
+      image: debian:12-slim
+    defaults:
+      run:
+        shell: bash
     timeout-minutes: 25
     steps:
+      - name: Prepare Debian 12
+        run: |
+          apt-get update
+          DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends bash ca-certificates coreutils findutils git grep jq python3 sed unzip zip
+          rm -rf /var/lib/apt/lists/*
       - name: Checkout
         uses: actions/checkout@v4
         with:

@@ -14,114 +14,73 @@
 
 # Dragon Fruit Relay
 
-Dragon Fruit Relay is a managed IKEv2/XFRM relay for Debian with separate **Egress Hub** and **Ingress Client** roles. The Egress Hub manages multiple isolated Client connections; each Client enrolls with a one-time DFR1 token and builds a route-based strongSwan tunnel using a dedicated XFRM interface and custom UDP transport.
+Dragon Fruit Relay is a managed **IKEv2/IPsec + Linux XFRM relay for Debian**. It provides two roles through one installer: an **Egress Hub** that manages isolated connections and an **Ingress Client** that enrolls with a one-time DFR1 token.
+
+DFR manages the tunnel lifecycle around strongSwan, XFRM interfaces, policy routing, DNS, subscriptions, traffic accounting, speed policy, managed configuration, Client software releases, endpoint synchronization, backups, diagnostics and recovery.
 
 > [!WARNING]
-> **v2.1.0-rc.1 is a prerelease.** It is intended for validation and staged deployment before the final v2.1.0 release. Test it on non-critical systems first and keep current backups.
+> **v2.1.0-rc.1 is a prerelease.** Use it for validation and staged deployment before the final v2.1.0 release.
 
-## Highlights
+## Install
 
-- One public installer with interactive Egress Hub / Ingress Client role selection.
-- Public IPv4 works directly; DNS is optional.
-- Optional FQDN endpoint with authenticated Client synchronization and endpoint migration.
-- Multiple isolated Server-side Client connections with independent PSKs, UDP ports, XFRM interfaces, tunnel allocations, services, and lifecycle controls.
-- Per-connection subscription, quota, expiration, suspension, accounting, upload/download speed limits, and lifetime traffic.
-- Global Server upload/download shaping policy.
-- Authenticated CONTROL/1 management over the encrypted tunnel.
-- Client presence, health, managed configuration, endpoint, and software status.
-- Signed Server-managed Client releases with STAGED / CANARY / STABLE / REVOKED states and AUTO / MANUAL / PINNED policies.
-- Fresh Servers automatically publish their exact bundled v2.1.0 Client as STABLE; newly created connections default to AUTO/LATEST.
-- Automatic, manual, and rescue backups with verification and restore.
-- Operations Center, connection dossiers, fleet summaries, diagnostics, logs, repair, recovery, and isolated removal workflows.
-- Clean standalone DFR registry schema with an exact schema-contract test.
+Run the installer from a **root shell on Debian**.
 
-## Dedication
-
-The project name was chosen in solidarity with **Kian Pirfalak** and is dedicated to his memory.
-
-## Install the prerelease
-
-Download the **GitHub Release assets** rather than running the raw `main` branch installer. The release ZIP is built and tested by GitHub Actions from the signed release tag.
+### Latest recommended release
 
 ```bash
-TAG=v2.1.0-rc.1
-VERSION=2.1.0
-
-curl -fLO "https://github.com/ozimellow/dragon-fruit-relay/releases/download/${TAG}/dragon-fruit-relay-${VERSION}.zip"
-curl -fLO "https://github.com/ozimellow/dragon-fruit-relay/releases/download/${TAG}/SHA256SUMS"
-
-sha256sum -c SHA256SUMS
-unzip "dragon-fruit-relay-${VERSION}.zip"
-cd "dragon-fruit-relay-${VERSION}"
-sudo ./install.sh
+bash <(curl -fsSL https://raw.githubusercontent.com/ozimellow/dragon-fruit-relay/main/install.sh)
 ```
 
-The installer starts on a clean terminal page and asks for the role on a fresh machine:
+### Specific release
+
+```bash
+bash <(curl -fsSL https://raw.githubusercontent.com/ozimellow/dragon-fruit-relay/main/install.sh) --version v2.1.0-rc.1
+```
+
+The bootstrap downloads the matching GitHub Release, verifies its published SHA-256 checksum, extracts it to a temporary directory and launches the real installer. On a fresh host DFR asks which role to configure:
 
 ```text
 DRAGON FRUIT RELAY v2.1.0  |  INSTALLER
 
-  [1] Egress Hub (Server)
-  [2] Ingress Client (Client)
+  [1]  Egress Hub (Server)
+  [2]  Ingress Client (Client)
 ```
 
 Open the management interface later with:
 
 ```bash
-sudo dragon-fruit-relay
+dragon-fruit-relay
 ```
 
-## Verify the release
+## What DFR provides
 
-Every release ZIP contains `MANIFEST.sha256`; the GitHub Release also includes `SHA256SUMS` for the outer ZIP. The release workflow creates a GitHub artifact attestation using GitHub OIDC/Sigstore provenance.
-
-Verify the downloaded ZIP checksum:
-
-```bash
-sha256sum -c SHA256SUMS
-```
-
-Verify GitHub build provenance with GitHub CLI:
-
-```bash
-gh attestation verify dragon-fruit-relay-2.1.0.zip \
-  --repo ozimellow/dragon-fruit-relay \
-  --signer-workflow ozimellow/dragon-fruit-relay/.github/workflows/release.yml
-```
-
-After extraction, verify every packaged file:
-
-```bash
-cd dragon-fruit-relay-2.1.0
-sha256sum -c MANIFEST.sha256
-```
-
-The source tag is also signed. After fetching the repository:
-
-```bash
-git fetch --tags origin
-git tag -v v2.1.0-rc.1
-```
-
-GitHub should display the signed tag as **Verified** when the signing key is registered with the maintainer account.
+- One interactive installer for Egress Hub and Ingress Client roles.
+- Public IPv4 or FQDN Server endpoints, including managed endpoint migration.
+- One isolated PSK, custom UDP transport, XFRM interface and `/30` tunnel allocation per connection.
+- Per-connection subscriptions, quotas, expiration, suspension, upload/download accounting and speed limits.
+- Authenticated CONTROL/1 management over the encrypted tunnel.
+- Client presence, health, configuration convergence, endpoint state and software status.
+- Server-managed Client releases with **STAGED / CANARY / STABLE / REVOKED** states and **AUTO / MANUAL / PINNED** policies.
+- Automatic, manual and rescue backups with verification and restore workflows.
+- Fleet summaries, detailed connection dossiers, diagnostics, logs, repair and recovery tools.
 
 ## Deployment model
 
 ### Egress Hub
 
-The Egress Hub owns connection identity and allocation, subscriptions, quota and speed policy, accounting, Client presence, managed configuration, endpoint migration, Client software releases, backups, diagnostics, and recovery.
+The Egress Hub owns connection identity, tunnel allocation, subscriptions, accounting, policy, Client presence, managed configuration, endpoint synchronization, Client software releases, backups and recovery.
 
-Each connection receives its own custom UDP transport, PSK, XFRM identity, `/30` tunnel allocation, systemd runtime, and encrypted-tunnel management listeners.
+A fresh v2.1.0 Egress Hub publishes its exact bundled Client as **STABLE**. New connections default to **AUTO/LATEST** while MANUAL and PINNED remain explicit operator choices.
 
 ### Ingress Client
 
-The Ingress Client consumes a DFR1 enrollment token, creates the strongSwan/XFRM runtime, applies policy routing and DNS, receives subscription/configuration/software policy through CONTROL/1, and reports health and convergence state to the Egress Hub.
+The Ingress Client consumes a one-time DFR1 enrollment token and builds the managed strongSwan/XFRM runtime. It applies routing and DNS policy, receives managed configuration and software policy through CONTROL/1, and reports health and convergence back to the Egress Hub.
 
-Applications can use the managed Client XFRM source address as their egress path. Dragon Fruit Relay does not require or manage 3x-ui; it can be used alongside 3x-ui or other applications independently.
+Applications can use the managed Client XFRM address as their egress path. Dragon Fruit Relay is independent of 3x-ui and can be used with 3x-ui or other applications without managing them.
 
-## Endpoint model
+## Endpoint support
 
-The Server endpoint can be either a public IPv4 address or an FQDN:
+The Server endpoint can be either a public IPv4 address or an FQDN. DFR supports all normal transitions:
 
 ```text
 IPv4 -> IPv4
@@ -130,52 +89,23 @@ FQDN -> IPv4
 FQDN -> FQDN
 ```
 
-A stable endpoint reports `READY` / `IDLE` with Clients `SYNCED`. An endpoint change becomes `ACTIVE`; when all Clients converge it becomes `READY TO FINISH` until the operator completes the migration and retires retained fallback state.
+Clients synchronize authenticated endpoint changes through the management plane. Previous endpoint state is retained until the operator explicitly finishes a completed migration.
 
-## Client software management
+## Releases and trust
 
-The Egress Hub can publish bundled or imported Client engines, verify SHA-256 and signatures, assign release status, select rollout policy, track Client update state, and roll back failed deployments.
+Release tags are signed by the maintainer. GitHub Actions builds and tests the release package in **Debian 12**, verifies the extracted archive, publishes `SHA256SUMS`, and creates GitHub artifact attestations for release provenance.
 
-On a fresh v2.1.0 Server:
+For checksum, signed-tag and provenance verification, see [Release Verification](docs/RELEASE-VERIFICATION.md). Maintainer steps are documented separately in [Release Process](docs/RELEASE-PROCESS.md).
 
-- the exact bundled Client is published as **STABLE**;
-- new connections default to **AUTO**;
-- the current stable v2.1.0 payload is assigned immediately;
-- MANUAL and PINNED remain explicit operator choices.
+## Requirements
 
-## Persistent state
+- Debian with systemd
+- Root access
+- IPv4 connectivity
+- A reachable Server endpoint
+- One available custom UDP port per managed connection
 
-Server registry:
-
-```text
-/var/lib/dragon-fruit-relay/database/registry.sqlite3
-```
-
-Managed configuration:
-
-```text
-/etc/dragon-fruit-relay
-```
-
-Logs:
-
-```text
-/var/log/dragon-fruit-relay
-```
-
-The standalone v2.1.0 line uses `product_lineage=standalone-dfr` and registry schema 1. It does not import or migrate installations from the retired product line.
-
-## Development and validation
-
-Run release-equivalent validation from the repository root:
-
-```bash
-./scripts/build-release.sh
-```
-
-That command builds the same release tree used by GitHub Actions, regenerates `MANIFEST.sha256`, runs the complete test suite, creates the ZIP, extracts that ZIP into a clean directory, and runs the suite again against the archive contents.
-
-CI runs the same build on pushes and pull requests. See [docs/RELEASE-PROCESS.md](docs/RELEASE-PROCESS.md) for the signed-tag and prerelease process.
+Required runtime packages are installed by DFR when needed.
 
 ## Documentation
 
@@ -189,9 +119,13 @@ CI runs the same build on pushes and pull requests. See [docs/RELEASE-PROCESS.md
 | Release verification | [docs/RELEASE-VERIFICATION.md](docs/RELEASE-VERIFICATION.md) |
 | Maintainer release process | [docs/RELEASE-PROCESS.md](docs/RELEASE-PROCESS.md) |
 
+## Dedication
+
+The project name was chosen in solidarity with **Kian Pirfalak** and is dedicated to his memory.
+
 ## Security
 
-Dragon Fruit Relay manages privileged networking, PSKs, enrollment secrets, signing keys, and backup material. Do not publish tokens, credentials, registry databases, private keys, or unredacted diagnostic captures.
+Dragon Fruit Relay manages privileged networking, PSKs, enrollment secrets, signing material and backup data. Never publish enrollment tokens, credentials, registry databases, private keys or unredacted diagnostic captures.
 
 See [SECURITY.md](SECURITY.md) for reporting and operational guidance.
 

@@ -6,6 +6,8 @@ readonly APP_NAME="Dragon Fruit Relay"
 readonly APP_VERSION="v2.1.0"
 readonly PRODUCT_ID="dragon-fruit-relay"
 readonly PRODUCT_LINEAGE="standalone-dfr"
+readonly BOOTSTRAP_REPO="ozimellow/dragon-fruit-relay"
+readonly BOOTSTRAP_DEFAULT_TAG="v2.1.0-rc.1"
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 EGRESS_ENGINE="${SCRIPT_DIR}/main-engine/dragon-fruit-relay-egress.sh"
 INGRESS_ENGINE="${SCRIPT_DIR}/main-engine/dragon-fruit-relay-ingress.sh"
@@ -80,6 +82,85 @@ dispatch() {
     exec "$engine" "$mode"
 }
 
+
+bootstrap_usage() {
+    cat <<'EOF'
+Dragon Fruit Relay installer
+
+Usage:
+  install.sh
+  install.sh --version TAG
+
+Examples:
+  install.sh --version v2.1.0-rc.1
+  install.sh --version v2.1.0
+EOF
+}
+
+bootstrap_release() {
+    local tag="$BOOTSTRAP_DEFAULT_TAG" version archive base_url tmp checksum_line
+
+    while (($#)); do
+        case "$1" in
+            --version)
+                [[ $# -ge 2 && -n "$2" ]] || { printf 'ERROR: --version requires a release tag.\n' >&2; exit 2; }
+                tag="$2"; shift 2 ;;
+            --version=*) tag="${1#*=}"; shift ;;
+            -h|--help) bootstrap_usage; exit 0 ;;
+            *) printf 'ERROR: Unknown installer option: %s\n' "$1" >&2; bootstrap_usage >&2; exit 2 ;;
+        esac
+    done
+
+    [[ "$tag" == v* ]] || tag="v${tag}"
+    if [[ ! "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([.-][A-Za-z0-9][A-Za-z0-9.-]*)?$ ]]; then
+        printf 'ERROR: Invalid Dragon Fruit Relay release tag: %s\n' "$tag" >&2
+        exit 2
+    fi
+
+    if [[ ${EUID:-$(id -u)} -ne 0 ]]; then
+        printf 'ERROR: Run the Dragon Fruit Relay installer as root.\n' >&2
+        exit 1
+    fi
+    command -v curl >/dev/null 2>&1 || { printf 'ERROR: curl is required.\n' >&2; exit 1; }
+    command -v sha256sum >/dev/null 2>&1 || { printf 'ERROR: sha256sum is required.\n' >&2; exit 1; }
+
+    if ! command -v unzip >/dev/null 2>&1; then
+        command -v apt-get >/dev/null 2>&1 || { printf 'ERROR: unzip is required.\n' >&2; exit 1; }
+        printf '[INFO] Installing unzip...\n'
+        apt-get update -qq
+        DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends unzip ca-certificates >/dev/null
+    fi
+
+    version="${tag#v}"
+    version="${version%%-*}"
+    archive="dragon-fruit-relay-${version}.zip"
+    base_url="https://github.com/${BOOTSTRAP_REPO}/releases/download/${tag}"
+    tmp=$(mktemp -d -t dragon-fruit-relay.XXXXXXXX)
+    trap "rm -rf -- '$tmp'" EXIT
+
+    printf '[INFO] Installing Dragon Fruit Relay %s...\n' "$tag"
+    curl -fL --retry 3 --connect-timeout 15 -o "$tmp/$archive" "$base_url/$archive"
+    curl -fL --retry 3 --connect-timeout 15 -o "$tmp/SHA256SUMS" "$base_url/SHA256SUMS"
+
+    checksum_line=$(awk -v file="$archive" '$2 == file { print; found=1 } END { if (!found) exit 1 }' "$tmp/SHA256SUMS") || {
+        printf 'ERROR: %s is not listed in the release checksum file.\n' "$archive" >&2
+        exit 1
+    }
+    printf '%s\n' "$checksum_line" > "$tmp/$archive.sha256"
+    (cd "$tmp" && sha256sum -c "$archive.sha256")
+
+    unzip -q "$tmp/$archive" -d "$tmp"
+    [[ -f "$tmp/dragon-fruit-relay-${version}/install.sh" ]] || {
+        printf 'ERROR: Release archive does not contain the expected installer.\n' >&2
+        exit 1
+    }
+    chmod 0755 "$tmp/dragon-fruit-relay-${version}/install.sh" \
+        "$tmp/dragon-fruit-relay-${version}/main-engine/dragon-fruit-relay-egress.sh" \
+        "$tmp/dragon-fruit-relay-${version}/main-engine/dragon-fruit-relay-ingress.sh"
+
+    "$tmp/dragon-fruit-relay-${version}/install.sh"
+}
+
 main() {
     local existing_file='' role='' product='' lineage='' iface gateway choice platform
     installer_clear_screen
@@ -126,4 +207,8 @@ main() {
     IFS= read -r choice
     case "$choice" in 1) dispatch egress-hub init ;; 2) dispatch ingress init ;; q|Q|0) exit 0 ;; *) printf 'ERROR: Select 1 or 2.\n' >&2; exit 2 ;; esac
 }
-main "$@"
+if [[ -f "$EGRESS_ENGINE" && -f "$INGRESS_ENGINE" ]]; then
+    main "$@"
+else
+    bootstrap_release "$@"
+fi
