@@ -10,8 +10,21 @@ grep -q 'backup_original /etc/resolv.conf' "$INGRESS"
 grep -q 'backup_original /etc/nsswitch.conf' "$INGRESS"
 grep -q 'backup_original /etc/systemd/resolved.conf' "$INGRESS"
 
-# Exercise the exact pre-token backup transaction in an isolated mount namespace.
-if [[ ${EUID:-$(id -u)} -eq 0 ]] && command -v unshare >/dev/null 2>&1; then
+# Exercise the exact pre-token backup transaction in an isolated mount namespace
+# when the kernel/container permits user and mount namespaces.
+can_use_private_mount_namespace() {
+    unshare -rm bash --noprofile --norc -c '
+        set -Eeuo pipefail
+        probe=$(mktemp -d)
+        mount -t tmpfs tmpfs "$probe"
+        umount "$probe"
+        rmdir "$probe"
+    ' >/dev/null 2>&1
+}
+
+if [[ ${EUID:-$(id -u)} -eq 0 ]] &&
+   command -v unshare >/dev/null 2>&1 &&
+   can_use_private_mount_namespace; then
     unshare -rm bash --noprofile --norc -c '
         set -Eeuo pipefail
         mount -t tmpfs tmpfs /var/lib
@@ -27,6 +40,8 @@ if [[ ${EUID:-$(id -u)} -eq 0 ]] && command -v unshare >/dev/null 2>&1; then
         test -f "$PACKAGE_STATE_FILE"
         grep -q "^STRONGSWAN_UNIT_EXISTED=" "$PACKAGE_STATE_FILE"
     ' _ "$INGRESS"
+else
+    printf '%s\n' 'Client fresh-setup transaction: namespace runtime check skipped; static backup contract verified'
 fi
 
 printf '%s\n' 'Client fresh-setup transaction: pre-token backup path OK'
