@@ -58,6 +58,43 @@ dragon-fruit-relay
 
 v2.1.0 is a major expansion of Dragon Fruit Relay. v2.0.2 primarily managed the encrypted host-level IKEv2/IPsec and XFRM path. v2.1.0 keeps that foundation and adds a standalone management plane around it.
 
+### v2.0.2 vs v2.1.0 at a glance
+
+> **Legend:** ✅ Built into Dragon Fruit Relay in that release · ❌ Not available as a native DFR capability in that release
+
+| Capability | v2.0.2 | v2.1.0 |
+|---|:---:|:---:|
+| Route-based IKEv2/IPsec with Linux XFRM | ✅ | ✅ |
+| Multi-connection Egress Hub | ✅ | ✅ |
+| Custom UDP transport | ✅ | ✅ |
+| Automatic per-connection `/30` tunnel allocation | ✅ | ✅ |
+| Managed routing, forwarding, NAT and DNS | ✅ | ✅ |
+| Standalone DFR product lineage and schema identity | ❌ | ✅ |
+| Authoritative SQLite Server registry | ❌ | ✅ |
+| One-time **DFR1** enrollment tokens | ❌ | ✅ |
+| Authenticated **CONTROL/1** management plane | ❌ | ✅ |
+| Native subscription, quota, expiry and suspension policy | ❌ | ✅ |
+| Native current-period and lifetime traffic accounting | ❌ | ✅ |
+| Per-connection upload/download speed limits | ❌ | ✅ |
+| Server-wide traffic shaping policy | ❌ | ✅ |
+| Client presence, health and convergence reporting | ❌ | ✅ |
+| Public IPv4 **or FQDN** Server endpoints | ❌ | ✅ |
+| Managed endpoint migration with retained fallback state | ❌ | ✅ |
+| Endpoint drift detection and reconciliation | ❌ | ✅ |
+| Transactional managed configuration with verification/rollback | ❌ | ✅ |
+| Server-managed signed Client software delivery | ❌ | ✅ |
+| **STAGED / CANARY / STABLE / REVOKED** release lifecycle | ❌ | ✅ |
+| **AUTO / MANUAL / PINNED** per-connection software policy | ❌ | ✅ |
+| Bundled Client automatically verified and published as **STABLE** | ❌ | ✅ |
+| Portable verified Server backup format | ❌ | ✅ |
+| Manual, automatic and rescue backup workflows | ❌ | ✅ |
+| Zero-connection Egress Hub as a valid operational state | ❌ | ✅ |
+| Fleet summaries and detailed connection dossiers | ❌ | ✅ |
+| Debian 12 release-equivalent CI with exact ZIP re-test | ❌ | ✅ |
+| Automated signed-tag release gate and artifact attestation | ❌ | ✅ |
+
+The core tunnel architecture remains familiar, but v2.1.0 moves Dragon Fruit Relay from a tunnel-management utility into a self-contained managed relay platform. Capabilities marked ❌ under v2.0.2 may have been handled externally by software such as 3x-ui/Xray; they were not native DFR features in that release.
+
 ### Standalone Dragon Fruit Relay lineage
 
 v2.1.0 establishes Dragon Fruit Relay as its own **standalone DFR product line** with explicit product, schema and upgrade identity.
