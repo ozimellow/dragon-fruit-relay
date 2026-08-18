@@ -7389,6 +7389,14 @@ def _safe_backup_members(tf):
     return members
 
 
+def _extract_backup(tf,destination):
+    members=_safe_backup_members(tf)
+    if hasattr(tarfile,'data_filter'):
+        tf.extractall(destination,members=members,filter='data')
+    else:
+        tf.extractall(destination,members=members)
+    return members
+
 def _verify_signing_pair(root):
     key=root/'secrets'/'ingress-update-ed25519.key'
     pub=root/'secrets'/'ingress-update-ed25519.pub'
@@ -7437,7 +7445,7 @@ def verify_backup(path):
         td=pathlib.Path(td)
         try:
             with tarfile.open(path,'r:gz') as tf:
-                members=_safe_backup_members(tf); tf.extractall(td,filter='data')
+                members=_extract_backup(tf,td)
             manifest=json.loads((td/'manifest.json').read_text())
             if manifest.get('format')!='dragon-fruit-relay-backup' or int(manifest.get('format_version',0))!=1:
                 raise ValueError('unsupported DFR backup format')
@@ -7477,7 +7485,7 @@ def cmd_backup_restore(a):
     with tempfile.TemporaryDirectory(prefix='dfr-restore-') as td:
         td=pathlib.Path(td)
         with tarfile.open(path,'r:gz') as tf:
-            _safe_backup_members(tf); tf.extractall(td,filter='data')
+            _extract_backup(tf,td)
         manifest=json.loads((td/'manifest.json').read_text()); snap=td/'registry.sqlite3'
         DB.parent.mkdir(parents=True,exist_ok=True,mode=0o700); tmp=DB.with_suffix('.restore.tmp')
         shutil.copy2(snap,tmp); os.chmod(tmp,0o600)

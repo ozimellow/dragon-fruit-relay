@@ -6,7 +6,20 @@ with tempfile.TemporaryDirectory(prefix='dfr-registry-test-') as td:
     td=Path(td); helper=td/'registry.py'
     subprocess.run([str(root/'tests'/'extract-registry.py'),str(helper)],check=True,stdout=subprocess.DEVNULL)
     env=os.environ.copy(); env.update(DFR_STATE_ROOT=str(td/'state'),DFR_REGISTRY_DB=str(td/'state/database/registry.sqlite3'),DFR_BACKUP_DIR=str(td/'state/backups'),DFR_CONFIG_ROOT=str(td/'etc'),DFR_REGISTRY_RUNTIME_STATE=str(td/'runtime.json'),DFR_NFT='/bin/true',DFR_TC='/bin/true')
-    def run(*args): return subprocess.run([sys.executable,str(helper),*map(str,args)],env=env,check=True,text=True,capture_output=True).stdout.strip()
+    def run(*args):
+        cp=subprocess.run(
+            [sys.executable,str(helper),*map(str,args)],
+            env=env,
+            text=True,
+            capture_output=True,
+        )
+        if cp.returncode != 0:
+            raise AssertionError(
+                "registry helper failed: "
+                + " ".join(map(str,args))
+                + f"\nstdout:\n{cp.stdout}\nstderr:\n{cp.stderr}"
+            )
+        return cp.stdout.strip()
     run('init','--endpoint','193.11.160.92')
     contract=json.loads(run('schema-contract'))
     expected_tables={
