@@ -14,30 +14,30 @@
 
 # Dragon Fruit Relay
 
-Dragon Fruit Relay is a managed **IKEv2/IPsec + Linux XFRM relay for Debian** with two roles: an **Egress Hub** that manages isolated Client connections and an **Ingress Client** that enrolls with a one-time DFR1 token.
+Dragon Fruit Relay is a managed **IKEv2/IPsec + Linux XFRM relay for Debian** with two roles: an **Egress Hub Server** and an **Ingress Client**.
 
-DFR manages strongSwan, XFRM interfaces, policy routing, DNS, subscriptions, traffic accounting, speed policy, managed configuration, endpoint synchronization, Client software releases, backups, diagnostics and recovery from one terminal interface.
+It manages strongSwan, XFRM interfaces, routing, DNS, subscriptions, traffic accounting, speed policy, endpoint synchronization, managed Client software, backups, diagnostics and recovery from one terminal interface.
 
 > [!WARNING]
-> **v2.1.0-rc.1 is a prerelease.** It is intended for validation and staged deployment before the final v2.1.0 release.
+> **v2.1.0-rc.1 is a prerelease.** Use it for validation and staged deployment before the final v2.1.0 release.
 
 ## Install
 
 Run from a **root shell on Debian**.
 
-### Latest v2.1.0 prerelease
+### Latest v2.1.0 prerelease branch
 
 ```bash
 bash <(curl -fsSL https://raw.githubusercontent.com/ozimellow/dragon-fruit-relay/refs/heads/release/v2.1.0-rc.1/install.sh)
 ```
 
-### Specific release
+### Pinned v2.1.0-rc.1 release
 
 ```bash
 bash <(curl -fsSL https://raw.githubusercontent.com/ozimellow/dragon-fruit-relay/refs/tags/v2.1.0-rc.1/install.sh)
 ```
 
-The bootstrap downloads the matching GitHub Release, verifies its published SHA-256 checksum, extracts it to a temporary directory and starts the real installer. No manual ZIP download or extraction is required.
+The bootstrap downloads the matching GitHub Release, verifies its published SHA-256 checksum, extracts it to a temporary directory and launches the packaged installer.
 
 On a fresh host:
 
@@ -54,34 +54,64 @@ Open DFR later with:
 dragon-fruit-relay
 ```
 
-## Highlights
+## What changed from v2.0.2 to v2.1.0
 
-- One installer for Egress Hub and Ingress Client roles.
-- Public IPv4 or FQDN Server endpoints with authenticated endpoint synchronization and migration.
-- Isolated PSK, custom UDP transport, XFRM interface and `/30` tunnel allocation per connection.
-- Per-connection subscriptions, quotas, expiration, suspension, traffic accounting and upload/download speed limits.
-- Authenticated CONTROL/1 management over the encrypted tunnel.
-- Client presence, health, managed configuration, endpoint and software convergence states.
-- Server-managed Client releases with **STAGED / CANARY / STABLE / REVOKED** states and **AUTO / MANUAL / PINNED** policies.
-- Fresh v2.1.0 Servers publish their exact bundled Client as **STABLE** and new connections default to **AUTO/LATEST**.
-- Automatic, manual and rescue backups with verification and restore.
-- Fleet summaries, detailed connection dossiers, diagnostics, logs, repair and recovery workflows.
+v2.1.0 is a major expansion of Dragon Fruit Relay. v2.0.2 primarily managed the encrypted host-level IKEv2/IPsec and XFRM path. v2.1.0 keeps that foundation and adds a standalone management plane around it.
 
-## Deployment
+### Standalone Dragon Fruit Relay lineage
 
-### Egress Hub
+v2.1.0 establishes Dragon Fruit Relay as its own **standalone DFR product line** with explicit product, schema and upgrade identity.
 
-The Egress Hub owns connection identity, tunnel allocation, subscriptions, accounting, policy, Client presence, managed configuration, endpoint synchronization, Client software releases, backups and recovery.
+- Clean `registry_schema=1` Server database contract.
+- Explicit standalone lineage markers in managed configuration and registry metadata.
+- One installer for both Egress Hub Server and Ingress Client roles.
+- Existing standalone DFR installations preserve their installed role during upgrades.
+- Unmarked pre-lineage installations are rejected instead of being guessed, imported or silently converted.
 
-### Ingress Client
+### Native Server registry and fleet management
 
-The Ingress Client consumes a one-time DFR1 enrollment token and builds the managed strongSwan/XFRM runtime. It applies routing and DNS policy, receives managed configuration and software policy through CONTROL/1, and reports health and convergence back to the Egress Hub.
+The Egress Hub now owns the authoritative state for every managed connection.
 
-Dragon Fruit Relay is independent of 3x-ui. Applications may use the managed Client XFRM address as their egress path without DFR managing the application itself.
+- SQLite-backed Server registry.
+- Zero-connection Egress Hub is a valid initialized state.
+- Per-connection identity, PSK, UDP transport, XFRM interface and `/30` tunnel allocation.
+- Fleet summaries, Client presence, health and convergence state.
+- Detailed Connection Overview with subscription, traffic and management state.
+- Isolated Server-side removal for a single connection without disturbing unrelated Clients.
 
-## Endpoint support
+### DFR1 enrollment and CONTROL/1
 
-The Server endpoint may be a public IPv4 address or an FQDN. Supported transitions include:
+v2.1.0 introduces a formal enrollment and management protocol instead of relying only on the original pairing flow.
+
+- One-time **DFR1 enrollment tokens**.
+- Tokens carry the Server endpoint, custom UDP transport, connection identity, tunnel allocation, subscription listener and CONTROL listener.
+- Authenticated **CONTROL/1** management runs inside the encrypted XFRM path.
+- Managed configuration transactions are verified and can roll back safely on failure.
+- Configuration coordination runs independently so a CONTROL responder restart cannot strand an in-flight change.
+
+### Subscriptions, quota, accounting and speed policy
+
+These capabilities are now native to Dragon Fruit Relay instead of needing to live in an external application layer.
+
+Per connection, the Server can manage:
+
+- quota
+- expiration
+- suspension/resume state
+- upload speed limit
+- download speed limit
+- current-period traffic usage
+- lifetime traffic counters
+
+The Server also supports global upload/download shaping policy.
+
+3x-ui and Xray can still use a DFR-managed XFRM path, but Dragon Fruit Relay no longer depends on them for its own subscription, accounting or connection-management model.
+
+### IPv4 and FQDN endpoint management
+
+The authoritative Egress endpoint can now be either a **public IPv4 address** or an **FQDN**.
+
+Supported transitions:
 
 ```text
 IPv4 -> IPv4
@@ -90,13 +120,109 @@ FQDN -> IPv4
 FQDN -> FQDN
 ```
 
-Previous endpoint state is retained until a completed migration is explicitly finished by the operator.
+Endpoint changes are synchronized through CONTROL/1. DFR retains the previous endpoint while Clients converge, reports the transition as **ACTIVE**, moves to **READY TO FINISH** after enrolled Clients confirm the new value, and removes the previous endpoint only when the operator explicitly finishes the migration.
+
+Endpoint drift can also be detected and reconciled even when no migration is open.
+
+### Managed Client software releases
+
+The Egress Hub can now distribute and control signed Ingress Client releases.
+
+Release lifecycle:
+
+```text
+STAGED -> CANARY -> STABLE
+                    REVOKED
+```
+
+Per-connection software policy:
+
+```text
+AUTO
+MANUAL
+PINNED
+```
+
+Fresh v2.1.0 Servers verify their exact bundled Ingress Client, publish it as **STABLE**, and new connections default to **AUTO/LATEST**.
+
+Client release verification covers checksum, Ed25519 signature, shell syntax, version and schema gates before deployment. Failed managed updates have rollback and recovery paths.
+
+### Backups, restore and recovery
+
+v2.1.0 adds portable, verified Server backups rather than relying only on local host rollback behavior.
+
+- Manual, automatic and rescue backup workflows.
+- Backup includes the authoritative registry, required signing material, release metadata and managed state.
+- Verification checks the backup format, registry schema, file manifest, SHA-256 digests, signing keypair and SQLite integrity before restore.
+- Client setup records original host state before DFR-managed changes so removal and recovery can restore DFR-owned integration points safely.
+
+### Reliability and release hardening
+
+v2.1.0 also adds substantial failure handling and release validation.
+
+- Fail-fast Server initialization and Client connection transactions.
+- Rollback when an inner configuration step fails.
+- Safe recovery for an interrupted empty standalone registry.
+- Strict refusal of destructive recovery when existing connection rows are present.
+- Exact table/column schema contract tests.
+- Exact bundled Client byte-for-byte and SHA-256 verification.
+- Static shell, generated Bash and embedded Python checks.
+- Exact extracted release ZIP is tested again before publication.
+- Signed release-tag enforcement.
+- Published `SHA256SUMS` and GitHub artifact attestations.
+- Release-equivalent validation runs inside Debian 12.
+
+### UI and operational improvements
+
+The terminal interface keeps the mature DFR workflow while exposing the new management state more clearly.
+
+- Server Connection Overview now includes the authoritative Subscription & Traffic dossier.
+- Client main menu is a compact Monitoring summary.
+- Full Client connection, subscription and managed CONTROL/software details live under Status & Detailed Summary.
+- Diagnostics is kept focused on diagnostic state and tools.
+- Refresh and Navigate controls were added to the Client interface.
+- Nested screens use consistent Navigation, Back and Exit behavior.
+- Fresh Client enrollment confirmation defaults to **Yes** after the administrator selects the Client enrollment flow.
+
+For implementation-level details, see [CHANGELOG.md](CHANGELOG.md).
+
+## Core capabilities
+
+- Route-based IKEv2/IPsec with Linux XFRM.
+- Egress Hub Server and Ingress Client roles.
+- Independent managed connection runtime per Client.
+- Public IPv4 or FQDN Server endpoints.
+- Custom UDP transport per connection.
+- Automatic IPv4 `/30` tunnel allocation.
+- Managed policy routing and DNS on the Client.
+- Per-connection forwarding and source NAT on the Server.
+- DFR1 enrollment and authenticated CONTROL/1.
+- Native subscriptions, quota, expiry and suspension.
+- Current-period and lifetime traffic accounting.
+- Per-connection and Server-wide speed policy.
+- Client presence, health and convergence monitoring.
+- Signed managed Client software with staged rollout policies.
+- Verified backup, restore, repair and recovery workflows.
+
+## Deployment model
+
+### Egress Hub Server
+
+The Egress Hub owns Server identity, the registry, connection allocation, enrollment, subscriptions, accounting, speed policy, Client presence, managed configuration, endpoint synchronization, Client software releases, backups and recovery.
+
+Each connection receives its own PSK, UDP listener, XFRM identity, `/30` allocation, strongSwan runtime, VICI socket, systemd unit and policy state.
+
+### Ingress Client
+
+The Ingress Client consumes a one-time DFR1 enrollment token, creates the assigned strongSwan/XFRM runtime, applies routing and resolver policy, receives managed state through CONTROL/1 and reports health and convergence back to the Egress Hub.
+
+Dragon Fruit Relay is independent of 3x-ui. Applications such as Xray may use the managed Client XFRM address as their egress path without DFR installing or managing the application itself.
 
 ## Releases and trust
 
-`main` remains the current stable line while this release candidate is developed and published from `release/v2.1.0-rc.1`.
+`main` remains the current stable line while v2.1.0 release candidates are developed and published from the release branch.
 
-Release tags are signed by the maintainer. GitHub Actions validates and builds DFR inside **Debian 12**, retests the exact extracted ZIP, publishes `SHA256SUMS`, and creates GitHub artifact attestations.
+Release tags are signed by the maintainer. GitHub Actions validates and builds DFR inside **Debian 12**, retests the exact extracted ZIP, publishes `SHA256SUMS`, and creates artifact attestations.
 
 See [Release Verification](docs/RELEASE-VERIFICATION.md) for checksum, signed-tag and provenance verification. Maintainer release steps are in [Release Process](docs/RELEASE-PROCESS.md).
 
@@ -114,13 +240,14 @@ Required runtime packages are installed automatically when needed.
 
 | Topic | Guide |
 |---|---|
-| Architecture | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) |
+| Architecture | [docs/architecture.md](docs/architecture.md) |
 | Database contract | [docs/DATABASE.md](docs/DATABASE.md) |
-| Operations | [docs/OPERATIONS.md](docs/OPERATIONS.md) |
+| Operations | [docs/operations.md](docs/operations.md) |
 | Backup and recovery | [docs/BACKUP-RECOVERY.md](docs/BACKUP-RECOVERY.md) |
-| Troubleshooting | [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) |
+| Troubleshooting | [docs/troubleshooting.md](docs/troubleshooting.md) |
 | Release verification | [docs/RELEASE-VERIFICATION.md](docs/RELEASE-VERIFICATION.md) |
 | Maintainer release process | [docs/RELEASE-PROCESS.md](docs/RELEASE-PROCESS.md) |
+| Full changelog | [CHANGELOG.md](CHANGELOG.md) |
 
 ## Dedication
 
