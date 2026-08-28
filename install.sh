@@ -100,7 +100,11 @@ EOF
 
 normalize_release_tag() {
     local tag="$1"
-    tag=$(normalize_release_tag "$tag")
+    [[ "$tag" == v* ]] || tag="v${tag}"
+    if [[ ! "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([.-][A-Za-z0-9][A-Za-z0-9.-]*)?$ ]]; then
+        printf 'ERROR: Invalid Dragon Fruit Relay release tag: %s\n' "$tag" >&2
+        exit 2
+    fi
     printf '%s' "$tag"
 }
 

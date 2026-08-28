@@ -56,6 +56,14 @@ required = [
 ]
 for item in required:
     assert item in s, f'public release bootstrap contract missing: {item}'
+
+start = s.index('normalize_release_tag() {')
+end = s.index('\n}\n', start) + 3
+normalize_body = s[start:end]
+assert 'tag=$(normalize_release_tag "$tag")' not in normalize_body, 'normalize_release_tag must not recursively call itself'
+assert '[[ "$tag" == v* ]] || tag="v${tag}"' in normalize_body, 'normalize_release_tag must add the v prefix'
+assert 'Invalid Dragon Fruit Relay release tag' in normalize_body, 'normalize_release_tag must validate release tags'
+
 assert s.rfind('bootstrap_release "$@"') > s.rfind('main "$@"'), 'bootstrap/local dispatch contract missing'
 PY
 printf '%s\n' 'installer bootstrap: release tag selection and SHA-256 verification contract OK'
