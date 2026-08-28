@@ -78,26 +78,6 @@ DFR manages the encrypted host-level path between the Ingress and Egress systems
   </picture>
 </p>
 
-```text
- Application / routing policy
-            |
-            v
-   +------------------+
-   |  Ingress Client  |
-   | strongSwan/XFRM  |
-   +------------------+
-            |
-            |  managed IKEv2/IPsec
-            |  custom UDP transport
-            v
-   +------------------+
-   | Egress Hub Server|
-   | strongSwan/XFRM  |
-   +------------------+
-            |
-            v
-       destination
-```
 
 ## Roles
 
