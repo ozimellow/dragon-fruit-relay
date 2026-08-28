@@ -89,15 +89,60 @@ Dragon Fruit Relay installer
 
 Usage:
   install.sh
+  install.sh TAG
   install.sh --version TAG
 
 Examples:
-  install.sh --version v2.1.0
+  install.sh
+  install.sh v2.0.2
 EOF
+}
+
+normalize_release_tag() {
+    local tag="$1"
+    tag=$(normalize_release_tag "$tag")
+    printf '%s' "$tag"
+}
+
+bootstrap_tagged_release() {
+    local tag tmp url
+    tag=$(normalize_release_tag "$1")
+
+    if [[ ${EUID:-$(id -u)} -ne 0 ]]; then
+        printf 'ERROR: Run the Dragon Fruit Relay installer as root.\n' >&2
+        exit 1
+    fi
+    command -v curl >/dev/null 2>&1 || {
+        printf 'ERROR: curl is required.\n' >&2
+        exit 1
+    }
+
+    tmp=$(mktemp -d -t dragon-fruit-relay-version.XXXXXXXX)
+    trap "rm -rf -- '$tmp'" EXIT
+    url="https://raw.githubusercontent.com/${BOOTSTRAP_REPO}/refs/tags/${tag}/install.sh"
+
+    printf '[INFO] Installing Dragon Fruit Relay %s...\n' "$tag"
+    curl -fL --retry 3 --connect-timeout 15 -o "$tmp/install.sh" "$url"
+    chmod 0700 "$tmp/install.sh"
+
+    # v2.0.x bootstrap installers read DRAGON_FRUIT_REVISION when fetching
+    # their runtime. Pin it to the requested tag so an old version can never
+    # accidentally fetch the current main branch.
+    DRAGON_FRUIT_REVISION="$tag" \
+    DRAGON_FRUIT_REPOSITORY="$BOOTSTRAP_REPO" \
+        bash "$tmp/install.sh"
 }
 
 bootstrap_release() {
     local tag="$BOOTSTRAP_DEFAULT_TAG" version archive base_url tmp checksum_line
+
+    # 3x-ui-style public interface:
+    #   install.sh          -> latest stable
+    #   install.sh v2.0.2   -> exact tagged release
+    if (($# == 1)) && [[ "$1" != -* ]]; then
+        bootstrap_tagged_release "$1"
+        return
+    fi
 
     while (($#)); do
         case "$1" in
@@ -110,11 +155,7 @@ bootstrap_release() {
         esac
     done
 
-    [[ "$tag" == v* ]] || tag="v${tag}"
-    if [[ ! "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([.-][A-Za-z0-9][A-Za-z0-9.-]*)?$ ]]; then
-        printf 'ERROR: Invalid Dragon Fruit Relay release tag: %s\n' "$tag" >&2
-        exit 2
-    fi
+    tag=$(normalize_release_tag "$tag")
 
     if [[ ${EUID:-$(id -u)} -ne 0 ]]; then
         printf 'ERROR: Run the Dragon Fruit Relay installer as root.\n' >&2

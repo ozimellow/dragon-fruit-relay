@@ -18,7 +18,7 @@ Dragon Fruit Relay (DFR) is a managed **IKEv2/IPsec + Linux XFRM relay platform 
 
 DFR manages strongSwan, XFRM interfaces, routing, DNS, connection identity, subscriptions, traffic accounting, speed policy, endpoint synchronization, Client software, backups, diagnostics and recovery. It can be used by itself or as the network path underneath applications such as Xray/3x-ui.
 
-## Install
+## Quick Start
 
 Run from a **root shell on Debian**:
 
@@ -26,13 +26,13 @@ Run from a **root shell on Debian**:
 bash <(curl -fsSL https://raw.githubusercontent.com/ozimellow/dragon-fruit-relay/main/install.sh)
 ```
 
-For a version-pinned installation:
+To install a specific version, append its tag (for example `v2.0.2`):
 
 ```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/ozimellow/dragon-fruit-relay/refs/tags/v2.1.0/install.sh)
+bash <(curl -fsSL https://raw.githubusercontent.com/ozimellow/dragon-fruit-relay/main/install.sh) v2.0.2
 ```
 
-The bootstrap downloads the matching GitHub Release, verifies its published SHA-256 checksum, extracts the package to a temporary directory and launches the installer.
+Without a tag, the installer uses the latest stable release. With a tag, it installs that exact Dragon Fruit Relay release.
 
 On a fresh host:
 

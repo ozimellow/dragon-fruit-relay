@@ -45,6 +45,10 @@ s = Path(sys.argv[1]).read_text()
 required = [
     'BOOTSTRAP_DEFAULT_TAG="v2.1.0"',
     'bootstrap_release()',
+    'bootstrap_tagged_release()',
+    'normalize_release_tag()',
+    'refs/tags/${tag}/install.sh',
+    'DRAGON_FRUIT_REVISION="$tag"',
     '--version',
     'releases/download/${tag}',
     'SHA256SUMS',
@@ -86,19 +90,58 @@ esac
 CURL
     chmod 0755 "$B/bin/curl"
     cp "$ROOT/install.sh" "$B/run/install.sh"
-    bout=$(PATH="$B/bin:$PATH" bash "$B/run/install.sh" --version v2.1.0)
+    bout=$(PATH="$B/bin:$PATH" bash "$B/run/install.sh")
     grep -q 'dragon-fruit-relay-2.1.0.zip: OK' <<<"$bout"
     grep -q 'BOOTSTRAP_CHILD_OK' <<<"$bout"
     rm -rf "$B"
-    printf '%s\n' 'installer bootstrap: exact release ZIP checksum verified before packaged installer launch OK'
+    printf '%s\n' 'installer bootstrap: latest stable exact release ZIP checksum verified before packaged installer launch OK'
+
+    V=$(mktemp -d)
+    mkdir -p "$V/bin" "$V/run"
+    cat > "$V/bin/curl" <<'CURL'
+#!/usr/bin/env bash
+set -e
+out=''
+last=''
+while (($#)); do
+    case "$1" in
+        -o) out="$2"; shift 2 ;;
+        *) last="$1"; shift ;;
+    esac
+done
+case "$last" in
+    */refs/tags/v2.0.2/install.sh)
+        cat > "$out" <<'TAGGED'
+#!/usr/bin/env bash
+printf 'TAGGED_INSTALLER_OK\n'
+printf 'TAGGED_REVISION=%s\n' "${DRAGON_FRUIT_REVISION:-}"
+printf 'TAGGED_REPOSITORY=%s\n' "${DRAGON_FRUIT_REPOSITORY:-}"
+TAGGED
+        ;;
+    *)
+        printf 'unexpected tagged installer URL: %s\n' "$last" >&2
+        exit 2
+        ;;
+esac
+CURL
+    chmod 0755 "$V/bin/curl"
+    cp "$ROOT/install.sh" "$V/run/install.sh"
+    vout=$(PATH="$V/bin:$PATH" bash "$V/run/install.sh" v2.0.2)
+    grep -q '^TAGGED_INSTALLER_OK$' <<<"$vout"
+    grep -q '^TAGGED_REVISION=v2.0.2$' <<<"$vout"
+    grep -q '^TAGGED_REPOSITORY=ozimellow/dragon-fruit-relay$' <<<"$vout"
+    rm -rf "$V"
+    printf '%s\n' 'installer bootstrap: positional version tag selects the exact tagged installer OK'
 fi
 
 python3 - "$ROOT/README.md" <<'PY'
 from pathlib import Path
 import sys
 s = Path(sys.argv[1]).read_text()
-assert 'raw.githubusercontent.com/ozimellow/dragon-fruit-relay/main/install.sh' in s
-assert 'raw.githubusercontent.com/ozimellow/dragon-fruit-relay/refs/tags/v2.1.0/install.sh' in s
+main_url = 'raw.githubusercontent.com/ozimellow/dragon-fruit-relay/main/install.sh'
+assert main_url in s
+assert f'{main_url}) v2.0.2' in s
+assert 'refs/tags/v2.1.0/install.sh' not in s
 assert 'release/v2.1.0-rc.1/install.sh' not in s
 PY
-printf '%s\n' 'README installer contract: stable main/tag installation URLs OK'
+printf '%s\n' 'README installer contract: latest main installer + positional specific-version tag OK'
