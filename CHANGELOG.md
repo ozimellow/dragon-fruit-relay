@@ -1,6 +1,6 @@
 # Changelog
 
-## 2.1.0-rc.1 — v2.1.0 prerelease candidate
+## 2.1.0
 
 - Added tag-driven GitHub Actions release automation with exact archive re-test, `SHA256SUMS`, signed-tag enforcement, GitHub prerelease publishing, and OIDC/Sigstore artifact attestations.
 - Reworked the public README and maintainer release documentation for the standalone v2.1.0 source/package layout and verified prerelease installation flow.

@@ -7,7 +7,7 @@ readonly APP_VERSION="v2.1.0"
 readonly PRODUCT_ID="dragon-fruit-relay"
 readonly PRODUCT_LINEAGE="standalone-dfr"
 readonly BOOTSTRAP_REPO="ozimellow/dragon-fruit-relay"
-readonly BOOTSTRAP_DEFAULT_TAG="v2.1.0-rc.1"
+readonly BOOTSTRAP_DEFAULT_TAG="v2.1.0"
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 EGRESS_ENGINE="${SCRIPT_DIR}/main-engine/dragon-fruit-relay-egress.sh"
 INGRESS_ENGINE="${SCRIPT_DIR}/main-engine/dragon-fruit-relay-ingress.sh"
@@ -92,7 +92,6 @@ Usage:
   install.sh --version TAG
 
 Examples:
-  install.sh --version v2.1.0-rc.1
   install.sh --version v2.1.0
 EOF
 }

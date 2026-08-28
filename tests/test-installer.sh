@@ -43,7 +43,7 @@ from pathlib import Path
 import sys
 s = Path(sys.argv[1]).read_text()
 required = [
-    'BOOTSTRAP_DEFAULT_TAG="v2.1.0-rc.1"',
+    'BOOTSTRAP_DEFAULT_TAG="v2.1.0"',
     'bootstrap_release()',
     '--version',
     'releases/download/${tag}',
@@ -86,7 +86,7 @@ esac
 CURL
     chmod 0755 "$B/bin/curl"
     cp "$ROOT/install.sh" "$B/run/install.sh"
-    bout=$(PATH="$B/bin:$PATH" bash "$B/run/install.sh" --version v2.1.0-rc.1)
+    bout=$(PATH="$B/bin:$PATH" bash "$B/run/install.sh" --version v2.1.0)
     grep -q 'dragon-fruit-relay-2.1.0.zip: OK' <<<"$bout"
     grep -q 'BOOTSTRAP_CHILD_OK' <<<"$bout"
     rm -rf "$B"
@@ -97,8 +97,8 @@ python3 - "$ROOT/README.md" <<'PY'
 from pathlib import Path
 import sys
 s = Path(sys.argv[1]).read_text()
-assert 'raw.githubusercontent.com/ozimellow/dragon-fruit-relay/refs/heads/release/v2.1.0-rc.1/install.sh' in s
-assert 'raw.githubusercontent.com/ozimellow/dragon-fruit-relay/refs/tags/v2.1.0-rc.1/install.sh' in s
-assert 'raw.githubusercontent.com/ozimellow/dragon-fruit-relay/main/install.sh' not in s
+assert 'raw.githubusercontent.com/ozimellow/dragon-fruit-relay/main/install.sh' in s
+assert 'raw.githubusercontent.com/ozimellow/dragon-fruit-relay/refs/tags/v2.1.0/install.sh' in s
+assert 'release/v2.1.0-rc.1/install.sh' not in s
 PY
-printf '%s\n' 'README installer contract: prerelease branch/tag URLs do not depend on main OK'
+printf '%s\n' 'README installer contract: stable main/tag installation URLs OK'

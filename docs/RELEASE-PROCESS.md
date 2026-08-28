@@ -4,7 +4,7 @@ Dragon Fruit Relay releases are built from source by GitHub Actions. Workstation
 
 ## Branch model
 
-- `main` is the stable product line. It remains on v2.0.2 while v2.1.0 is a prerelease.
+- `main` is the stable product line. Stable `v2.1.0` is published from a signed tag that points to the exact validated tip of `main`.
 - v2.1.0 release candidates are developed on branches named after the signed prerelease tag, for example `release/v2.1.0-rc.1`.
 - Pushes to `main` and `release/**` run release-equivalent validation in a Debian 12 job container.
 - A prerelease tag must point to the **exact tip** of its matching `release/<tag>` branch.

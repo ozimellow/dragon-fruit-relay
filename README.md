@@ -6,8 +6,8 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/prerelease-v2.1.0--rc.1-F59E0B?style=flat-square" alt="v2.1.0-rc.1 prerelease">
-  <a href="../../actions/workflows/validate.yml"><img src="https://img.shields.io/github/actions/workflow/status/ozimellow/dragon-fruit-relay/validate.yml?branch=release%2Fv2.1.0-rc.1&style=flat-square&label=Debian%2012%20validation" alt="Debian 12 validation"></a>
+  <a href="CHANGELOG.md"><img src="https://img.shields.io/badge/release-v2.1.0-16A34A?style=flat-square" alt="Release v2.1.0"></a>
+  <a href="https://github.com/ozimellow/dragon-fruit-relay/actions/workflows/validate.yml"><img src="https://img.shields.io/github/actions/workflow/status/ozimellow/dragon-fruit-relay/validate.yml?branch=main&style=flat-square&label=Debian%2012%20validation" alt="Debian 12 validation"></a>
   <a href="https://www.debian.org/"><img src="https://img.shields.io/badge/platform-Debian-A81D33?style=flat-square" alt="Debian"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-GPL--3.0--or--later-C6265A?style=flat-square" alt="GPL-3.0-or-later"></a>
 </p>
@@ -18,23 +18,20 @@ Dragon Fruit Relay is a managed **IKEv2/IPsec + Linux XFRM relay for Debian** wi
 
 It manages strongSwan, XFRM interfaces, routing, DNS, subscriptions, traffic accounting, speed policy, endpoint synchronization, managed Client software, backups, diagnostics and recovery from one terminal interface.
 
-> [!WARNING]
-> **v2.1.0-rc.1 is a prerelease.** Use it for validation and staged deployment before the final v2.1.0 release.
-
 ## Install
 
 Run from a **root shell on Debian**.
 
-### Latest v2.1.0 prerelease branch
+### Latest stable release
 
 ```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/ozimellow/dragon-fruit-relay/refs/heads/release/v2.1.0-rc.1/install.sh)
+bash <(curl -fsSL https://raw.githubusercontent.com/ozimellow/dragon-fruit-relay/main/install.sh)
 ```
 
-### Pinned v2.1.0-rc.1 release
+### Pinned v2.1.0 release
 
 ```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/ozimellow/dragon-fruit-relay/refs/tags/v2.1.0-rc.1/install.sh)
+bash <(curl -fsSL https://raw.githubusercontent.com/ozimellow/dragon-fruit-relay/refs/tags/v2.1.0/install.sh)
 ```
 
 The bootstrap downloads the matching GitHub Release, verifies its published SHA-256 checksum, extracts it to a temporary directory and launches the packaged installer.
@@ -53,6 +50,25 @@ Open DFR later with:
 ```bash
 dragon-fruit-relay
 ```
+
+## Topology
+
+Dragon Fruit Relay manages the encrypted host-level path between an Ingress Client and an Egress Hub. Applications such as Xray/3x-ui may route selected traffic through the managed Ingress XFRM address, but the application layer is optional and remains outside DFR.
+
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/topology-dark.svg">
+    <img src="assets/topology.svg" alt="Dragon Fruit Relay topology showing application traffic entering an Ingress Client and crossing the managed IKEv2/IPsec XFRM path to an Egress Hub" width="920">
+  </picture>
+</p>
+
+## Quick start
+
+1. Install Dragon Fruit Relay on the egress host and select **Egress Hub (Server)**.
+2. Create a managed connection and copy its one-time **DFR1 enrollment token**.
+3. Install Dragon Fruit Relay on the ingress host, select **Ingress Client (Client)** and paste the token.
+4. Point the application or routing policy that should use DFR at the managed Ingress XFRM path shown by the Client.
+5. Use the Egress Hub to manage subscription policy, accounting, speed limits, endpoint synchronization, Client software and recovery.
 
 ## What changed from v2.0.2 to v2.1.0
 
@@ -78,7 +94,8 @@ v2.1.0 is a major expansion of Dragon Fruit Relay. v2.0.2 primarily managed the 
 | Per-connection upload/download speed limits | ❌ | ✅ |
 | Server-wide traffic shaping policy | ❌ | ✅ |
 | Client presence, health and convergence reporting | ❌ | ✅ |
-| Public IPv4 **or FQDN** Server endpoints | ❌ | ✅ |
+| Public IPv4 Server endpoint | ✅ | ✅ |
+| FQDN Server endpoint | ❌ | ✅ |
 | Managed endpoint migration with retained fallback state | ❌ | ✅ |
 | Endpoint drift detection and reconciliation | ❌ | ✅ |
 | Transactional managed configuration with verification/rollback | ❌ | ✅ |
@@ -257,7 +274,7 @@ Dragon Fruit Relay is independent of 3x-ui. Applications such as Xray may use th
 
 ## Releases and trust
 
-`main` remains the current stable line while v2.1.0 release candidates are developed and published from the release branch.
+`main` is the current stable Dragon Fruit Relay product line. Stable releases are published from signed tags that point to the exact validated tip of `main`.
 
 Release tags are signed by the maintainer. GitHub Actions validates and builds DFR inside **Debian 12**, retests the exact extracted ZIP, publishes `SHA256SUMS`, and creates artifact attestations.
 
